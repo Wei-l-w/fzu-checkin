@@ -477,6 +477,7 @@
     });
     dirty = false;
     setNotificationView();
+    updateSubSummaries();
     renderValidation(data.validation);
     updateControls();
   }
@@ -777,6 +778,23 @@
     if (role === 'owner') loadMembers().catch(handleError);
   }
 
+  const notifyNames = { none: '未启用', bark: 'Bark', serverchan: 'Server酱', wecom: '企业微信' };
+  const notifyKeys = { bark: 'bark_url', serverchan: 'serverchan_key', wecom: 'wecom_webhook' };
+  function updateSubSummaries() {
+    const dates = $('skip-dates').value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length;
+    const ranges = $('date-ranges').children.length;
+    const skip = $('skip-summary');
+    skip.textContent = dates || ranges ? `${dates ? `${dates} 个日期` : ''}${dates && ranges ? ' · ' : ''}${ranges ? `${ranges} 个区间` : ''}` : '未设置';
+    skip.classList.toggle('is-set', dates + ranges > 0);
+    const type = $('notify-type').value;
+    const notify = $('notify-summary');
+    if (type === 'none' || !notifyNames[type]) { notify.textContent = '未启用'; notify.classList.remove('is-set'); return; }
+    const saved = configured[notifyKeys[type]] === true;
+    const typed = $({ bark: 'bark-url', serverchan: 'serverchan-key', wecom: 'wecom-webhook' }[type]).value !== '';
+    notify.textContent = `${notifyNames[type]} · ${saved || typed ? (typed ? '待保存' : '已保存') : '待填写'}`;
+    notify.classList.toggle('is-set', saved || typed);
+  }
+
   function renderMembers(users) {
     const list = $('members-list');
     list.replaceChildren();
@@ -918,6 +936,7 @@
   if (window.matchMedia && window.matchMedia('(max-width: 700px)').matches) $('records-details').removeAttribute('open');
   $('config-form').addEventListener('input', setDirty);
   $('config-form').addEventListener('change', setDirty);
+  ['input', 'change'].forEach((type) => $('config-form').addEventListener(type, updateSubSummaries));
   ['longitude', 'latitude'].forEach((id) => {
     $(id).addEventListener('input', manualLocationEdited);
     $(id).addEventListener('change', manualLocationEdited);

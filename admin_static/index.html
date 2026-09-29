@@ -152,21 +152,28 @@
                     <p id="schedule-input-hint" class="field-hint">范围 21:00–23:55，按先后顺序。第一个时点签到，其余只在未成功时重试；22:30 后学校记迟到。改后需保存、预检并恢复定时。</p>
                   </section>
 
-                  <section class="card form-card" aria-labelledby="skip-title">
-                    <div class="numbered-heading"><span class="section-number">04</span><div><h3 id="skip-title">离校 / 请假日期</h3><p class="muted">命中的日期跳过自动签到。</p></div></div>
-                    <div class="field"><label for="skip-dates">单独日期 <span class="label-extra">一行一个</span></label><textarea id="skip-dates" name="skip-dates" class="date-lines" rows="2" placeholder="YYYY-MM-DD" autocapitalize="none" spellcheck="false" aria-describedby="skip-dates-hint"></textarea><p id="skip-dates-hint" class="field-hint">按北京时间判断，留空即不设置。</p></div>
-                    <div class="label-line range-heading"><span class="field-label">连续日期区间</span><button id="add-range" class="button button-small button-quiet" type="button">＋ 添加区间</button></div>
-                    <div id="date-ranges" class="date-ranges"></div>
-                    <p id="range-empty" class="empty-inline">暂未设置日期区间（含起止当天）</p>
-                  </section>
-
-                  <section class="card form-card" aria-labelledby="notify-title">
-                    <div class="numbered-heading"><span class="section-number">05</span><div><h3 id="notify-title">签到通知</h3><p class="muted">一种渠道即可，密钥不回显。</p></div></div>
-                    <div class="field"><label for="notify-type">通知渠道</label><select id="notify-type" name="notify-type"><option value="none">不启用通知</option><option value="bark">Bark（iPhone）</option><option value="serverchan">Server酱</option><option value="wecom">企业微信机器人</option></select></div>
-                    <div class="field secret-field" data-notify="bark" hidden><div class="label-line"><label for="bark-url">Bark 完整推送地址</label><span id="bark-saved" class="secret-status">未保存</span></div><input id="bark-url" type="password" autocomplete="new-password" maxlength="4096" placeholder="含私钥的 HTTPS 地址" aria-describedby="bark-hint"><div class="secret-footer"><span id="bark-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-bark" type="checkbox">清除已存地址</label></div></div>
-                    <div class="field secret-field" data-notify="serverchan" hidden><div class="label-line"><label for="serverchan-key">Server酱 SendKey</label><span id="serverchan-saved" class="secret-status">未保存</span></div><input id="serverchan-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="本人的 SendKey" aria-describedby="serverchan-hint"><div class="secret-footer"><span id="serverchan-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-serverchan" type="checkbox">清除已存密钥</label></div></div>
-                    <div class="field secret-field" data-notify="wecom" hidden><div class="label-line"><label for="wecom-webhook">企业微信 Webhook</label><span id="wecom-saved" class="secret-status">未保存</span></div><input id="wecom-webhook" type="password" autocomplete="new-password" maxlength="4096" placeholder="含 key 的 HTTPS Webhook" aria-describedby="wecom-hint"><div class="secret-footer"><span id="wecom-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-wecom" type="checkbox">清除已存地址</label></div></div>
-                    <div class="notification-test"><button class="button button-secondary button-small" type="button" data-action="notify-test">发送测试通知</button><p class="field-hint">切换渠道并保存会清除其他渠道密钥；测试通知不会签到。</p></div>
+                  <section class="card form-card form-card-collapsible" aria-label="离校日期与通知">
+                    <details id="skip-details" class="sub-details">
+                      <summary><span class="section-number">04</span><span class="sub-title">离校 / 请假日期</span><span id="skip-summary" class="sub-state">未设置</span></summary>
+                      <div class="sub-body">
+                        <p class="muted">命中的日期跳过自动签到，按北京时间判断。</p>
+                        <div class="field"><label for="skip-dates">单独日期 <span class="label-extra">一行一个</span></label><textarea id="skip-dates" name="skip-dates" class="date-lines" rows="2" placeholder="YYYY-MM-DD" autocapitalize="none" spellcheck="false" aria-describedby="skip-dates-hint"></textarea><p id="skip-dates-hint" class="field-hint">留空即不设置。</p></div>
+                        <div class="label-line range-heading"><span class="field-label">连续日期区间</span><button id="add-range" class="button button-small button-quiet" type="button">＋ 添加区间</button></div>
+                        <div id="date-ranges" class="date-ranges"></div>
+                        <p id="range-empty" class="empty-inline">暂未设置日期区间（含起止当天）</p>
+                      </div>
+                    </details>
+                    <details id="notify-details" class="sub-details">
+                      <summary><span class="section-number">05</span><span class="sub-title">签到通知</span><span id="notify-summary" class="sub-state">未启用</span></summary>
+                      <div class="sub-body">
+                        <p class="muted">只用一种渠道，密钥不回显。</p>
+                        <div class="field"><label for="notify-type">通知渠道</label><select id="notify-type" name="notify-type"><option value="none">不启用通知</option><option value="bark">Bark（iPhone）</option><option value="serverchan">Server酱</option><option value="wecom">企业微信机器人</option></select></div>
+                        <div class="field secret-field" data-notify="bark" hidden><div class="label-line"><label for="bark-url">Bark 完整推送地址</label><span id="bark-saved" class="secret-status">未保存</span></div><input id="bark-url" type="password" autocomplete="new-password" maxlength="4096" placeholder="含私钥的 HTTPS 地址" aria-describedby="bark-hint"><div class="secret-footer"><span id="bark-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-bark" type="checkbox">清除已存地址</label></div></div>
+                        <div class="field secret-field" data-notify="serverchan" hidden><div class="label-line"><label for="serverchan-key">Server酱 SendKey</label><span id="serverchan-saved" class="secret-status">未保存</span></div><input id="serverchan-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="本人的 SendKey" aria-describedby="serverchan-hint"><div class="secret-footer"><span id="serverchan-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-serverchan" type="checkbox">清除已存密钥</label></div></div>
+                        <div class="field secret-field" data-notify="wecom" hidden><div class="label-line"><label for="wecom-webhook">企业微信 Webhook</label><span id="wecom-saved" class="secret-status">未保存</span></div><input id="wecom-webhook" type="password" autocomplete="new-password" maxlength="4096" placeholder="含 key 的 HTTPS Webhook" aria-describedby="wecom-hint"><div class="secret-footer"><span id="wecom-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-wecom" type="checkbox">清除已存地址</label></div></div>
+                        <div class="notification-test"><button class="button button-secondary button-small" type="button" data-action="notify-test">发送测试通知</button><p class="field-hint">切换渠道并保存会清除其他渠道密钥；测试通知不会签到。</p></div>
+                      </div>
+                    </details>
                   </section>
                 </div>
               </div>

@@ -311,6 +311,22 @@ test('the control card states whether the timer is running and makes resume redu
   assert.deepEqual(running.writes(), []);
 });
 
+test('skip-date and notification sections are collapsed with live state summaries', async (t) => {
+  const { page, writes } = await fixture(t);
+  assert.equal(await page.evaluate(() => document.getElementById('skip-details').open), false);
+  assert.equal(await page.evaluate(() => document.getElementById('notify-details').open), false);
+  assert.equal(await page.locator('#skip-summary').textContent(), '未设置');
+  assert.equal(await page.locator('#notify-summary').textContent(), '未启用');
+  await page.evaluate(() => { document.getElementById('skip-details').open = true; document.getElementById('notify-details').open = true; });
+  await page.locator('#skip-dates').fill('2026-10-01\n2026-10-02');
+  await page.locator('#notify-type').selectOption('bark');
+  assert.equal(await page.locator('#skip-summary').textContent(), '2 个日期');
+  assert.equal(await page.locator('#notify-summary').textContent(), 'Bark · 待填写');
+  await page.locator('#bark-url').fill('https://push.example.invalid/OFFLINE-KEY');
+  assert.equal(await page.locator('#notify-summary').textContent(), 'Bark · 待保存');
+  assert.deepEqual(writes(), []);
+});
+
 test('the token card links to the school login page safely and explains the steps', async (t) => {
   const { page, writes } = await fixture(t);
   const link = page.locator('#sso-link');

@@ -1,9 +1,16 @@
 """Optional notifications; no response, secret URL, or raw exception is logged."""
+import datetime
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 import re
+import smtplib
+import ssl
 
 import requests
 
-from src.config import valid_notification_url
+from src.config import email_smtp_endpoint, valid_email_address, valid_notification_url
+
+BEIJING = datetime.timezone(datetime.timedelta(hours=8))
 
 
 def notify(cfg: dict, title: str, content: str) -> bool:
@@ -20,6 +27,8 @@ def notify(cfg: dict, title: str, content: str) -> bool:
             ok = _bark(n.get("bark_url", ""), title, content)
         elif ntype == "wecom":
             ok = _wecom(n.get("wecom_webhook", ""), title, content)
+        elif ntype == "email":
+            ok = _email(n, title, content)
         else:
             ok = False
     except Exception:
@@ -70,3 +79,36 @@ def _wecom(webhook: str, title: str, content: str) -> bool:
         webhook, json={"msgtype": "text", "text": {"content": f"{title}\n{content}"}},
     )
     return _business_ok(response, "errcode", 0)
+
+
+def _email(n: dict, title: str, content: str) -> bool:
+    """SMTP over TLS only: implicit TLS on 465, STARTTLS on 587; certificates are verified."""
+    address = n.get("email_address", "")
+    password = n.get("email_password", "")
+    recipient = n.get("email_to", "") or address
+    endpoint = email_smtp_endpoint(n)
+    if (endpoint is None or not valid_email_address(address) or not valid_email_address(recipient)
+            or not isinstance(password, str) or not password):
+        return False
+    host, port = endpoint
+    message = EmailMessage()
+    message["Subject"] = title
+    message["From"] = address
+    message["To"] = recipient
+    message["Date"] = formatdate(localtime=False)
+    message["Message-ID"] = make_msgid(domain=address.rpartition("@")[2])
+    sent_at = datetime.datetime.now(BEIJING).strftime("%Y-%m-%d %H:%M:%S")
+    message.set_content(f"{content}\n\n发送时间：{sent_at}（北京时间）\n此邮件由 fzu-checkin 自动签到服务发送。")
+    context = ssl.create_default_context()
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, timeout=15, context=context) as server:
+            server.login(address, password)
+            refused = server.send_message(message)
+    else:
+        with smtplib.SMTP(host, port, timeout=15) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.ehlo()
+            server.login(address, password)
+            refused = server.send_message(message)
+    return not refused

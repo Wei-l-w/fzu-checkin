@@ -327,6 +327,27 @@ test('skip-date and notification sections are collapsed with live state summarie
   assert.deepEqual(writes(), []);
 });
 
+test('the email channel sends its own fields and clears the other channels on save', async (t) => {
+  const { page, writes, saveStarted } = await fixture(t);
+  await page.evaluate(() => { document.getElementById('notify-details').open = true; });
+  await page.locator('#notify-type').selectOption('email');
+  assert.equal(await page.locator('#email-address').isVisible(), true);
+  assert.equal(await page.locator('#bark-url').isVisible(), false);
+  assert.equal(await page.locator('#notify-summary').textContent(), '邮箱 · 待填写');
+  await page.locator('#email-address').fill('  offline@qq.com ');
+  await page.locator('#email-password').fill('abcd efgh ijkl mnop');
+  assert.equal(await page.locator('#notify-summary').textContent(), '邮箱 · 待保存');
+  await page.locator('#save-button').click();
+  await saveStarted;
+  const body = writes()[0].body;
+  assert.equal(body.config.notify.type, 'email');
+  assert.equal(body.config.notify.email_address, 'offline@qq.com');
+  assert.equal(body.config.notify.email_password, 'abcd efgh ijkl mnop');
+  assert.equal(body.config.notify.email_to, '');
+  assert.deepEqual([...body.clear_secrets].sort(), ['notify.bark_url', 'notify.serverchan_key', 'notify.wecom_webhook']);
+  await page.waitForFunction(() => !document.getElementById('save-button').disabled);
+});
+
 test('the token card links to the school login page safely and explains the steps', async (t) => {
   const { page, writes } = await fixture(t);
   const link = page.locator('#sso-link');

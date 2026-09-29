@@ -200,6 +200,32 @@ class PrivateConfigTests(unittest.TestCase):
         cfg["schedule"] = "21:35"
         self.assertTrue(any(error.startswith("schedule:") for error in validation_errors(cfg)))
 
+    def test_email_notification_validation(self):
+        from src.config import email_smtp_endpoint
+        cfg = valid_config()
+        cfg["notify"] = {"type": "email", "email_address": "offline@qq.com", "email_password": "abcdabcdabcdabcd"}
+        self.assertEqual(validation_errors(cfg), [])
+        self.assertEqual(email_smtp_endpoint(cfg["notify"]), ("smtp.qq.com", 465))
+        cfg["notify"].update(email_address="offline@example.edu.cn", email_smtp="SMTP.Example.edu.cn:587", email_to="to@example.com")
+        self.assertEqual(validation_errors(cfg), [])
+        self.assertEqual(email_smtp_endpoint(cfg["notify"]), ("smtp.example.edu.cn", 587))
+        for change, prefix in [
+            ({"email_address": "not-an-address"}, "notify.email_address"),
+            ({"email_password": ""}, "notify.email_password"),
+            ({"email_password": "has space inside"}, "notify.email_password"),
+            ({"email_to": "nobody"}, "notify.email_to"),
+            ({"email_smtp": "10.0.0.1"}, "notify.email_smtp"),
+            ({"email_smtp": "smtp.example.edu.cn:25"}, "notify.email_smtp"),
+            ({"email_smtp": "", "email_address": "offline@unknown.example"}, "notify.email_smtp"),
+        ]:
+            case = valid_config()
+            case["notify"] = dict(cfg["notify"], **change)
+            with self.subTest(change=change):
+                self.assertTrue(any(error.startswith(prefix) for error in validation_errors(case)), validation_errors(case))
+        case = valid_config()
+        case["notify"] = {"type": "bark", "bark_url": "https://push.example.invalid/KEY", "email_password": "abcdabcdabcdabcd"}
+        self.assertTrue(any(error.startswith("notify.email_password: 仅能填写") for error in validation_errors(case)))
+
     def test_dates_are_strict_and_all_ranges_validate_before_matching(self):
         self.assertEqual(parse_date("2026-09-18"), dt.date(2026, 9, 18))
         self.assertEqual(parse_date(dt.date(2026, 9, 18)), dt.date(2026, 9, 18))

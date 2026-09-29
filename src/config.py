@@ -300,6 +300,43 @@ def schedule_times(cfg: dict) -> list[str]:
     return list(times) if valid_schedule_times(times) else list(DEFAULT_SCHEDULE_TIMES)
 
 
+EMAIL_PRESETS = {
+    "qq.com": ("smtp.qq.com", 465), "vip.qq.com": ("smtp.qq.com", 465), "foxmail.com": ("smtp.qq.com", 465),
+    "163.com": ("smtp.163.com", 465), "126.com": ("smtp.126.com", 465), "yeah.net": ("smtp.yeah.net", 465),
+    "gmail.com": ("smtp.gmail.com", 465),
+}
+EMAIL_ADDRESS_MESSAGE = "notify.email_address: 需要有效的发件邮箱地址"
+EMAIL_PASSWORD_MESSAGE = "notify.email_password: 需要邮箱的 SMTP 授权码"
+EMAIL_TO_MESSAGE = "notify.email_to: 收件邮箱格式无效"
+EMAIL_SMTP_MESSAGE = "notify.email_smtp: 无法识别该邮箱的 SMTP 服务器，请填写 smtp.example.com 或 smtp.example.com:587（端口仅支持 465/587）"
+_HOST_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_EMAIL_PATTERN = re.compile(rf"[A-Za-z0-9._%+-]{{1,64}}@{_HOST_LABEL}(?:\.{_HOST_LABEL})+")
+_SMTP_PATTERN = re.compile(rf"({_HOST_LABEL}(?:\.{_HOST_LABEL})+)(?::(465|587))?")
+
+
+def valid_email_address(value) -> bool:
+    return isinstance(value, str) and len(value) <= 254 and _EMAIL_PATTERN.fullmatch(value) is not None
+
+
+def email_smtp_endpoint(notification) -> tuple[str, int] | None:
+    """(host, port): explicit ``email_smtp`` ("host" or "host:465|587", no IP literals) or a provider preset."""
+    if not isinstance(notification, dict):
+        return None
+    custom = notification.get("email_smtp", "")
+    if not isinstance(custom, str):
+        return None
+    custom = custom.strip()
+    if custom:
+        match = _SMTP_PATTERN.fullmatch(custom)
+        if match is None or len(match.group(1)) > 253 or re.fullmatch(r"[0-9.]+", match.group(1)):
+            return None
+        return match.group(1).lower(), int(match.group(2) or 465)
+    address = notification.get("email_address", "")
+    if not valid_email_address(address):
+        return None
+    return EMAIL_PRESETS.get(address.rpartition("@")[2].lower())
+
+
 def validation_errors(cfg: dict) -> list[str]:
     """Safe fixed field descriptions, never interpolation of the supplied value."""
     errors = []
@@ -372,9 +409,9 @@ def validation_errors(cfg: dict) -> list[str]:
     if isinstance(schedule, dict) and (set(schedule) - {"times"} or not valid_schedule_times(schedule.get("times"))):
         errors.append(SCHEDULE_MESSAGE)
     ntype = notification.get("type", "none")
-    if ntype not in ("none", "serverchan", "bark", "wecom"):
-        errors.append("notify.type: 只允许 none/serverchan/bark/wecom")
-    fields = {"serverchan": "serverchan_key", "bark": "bark_url", "wecom": "wecom_webhook"}
+    if ntype not in ("none", "serverchan", "bark", "wecom", "email"):
+        errors.append("notify.type: 只允许 none/serverchan/bark/wecom/email")
+    fields = {"serverchan": "serverchan_key", "bark": "bark_url", "wecom": "wecom_webhook", "email": "email_password"}
     for provider, field in fields.items():
         value = notification.get(field, "")
         if not isinstance(value, str):
@@ -389,6 +426,23 @@ def validation_errors(cfg: dict) -> list[str]:
         field = fields[ntype]
         if not valid_notification_url(notification.get(field, ""), ntype):
             errors.append(f"notify.{field}: 需要有效的 HTTPS 推送地址")
+    elif ntype == "email":
+        address = notification.get("email_address", "")
+        if not valid_email_address(address):
+            errors.append(EMAIL_ADDRESS_MESSAGE)
+        password = notification.get("email_password", "")
+        if not isinstance(password, str) or re.fullmatch(r"[\x21-\x7e]{4,256}", password) is None:
+            errors.append(EMAIL_PASSWORD_MESSAGE)
+        recipient = notification.get("email_to", "")
+        if recipient and not valid_email_address(recipient):
+            errors.append(EMAIL_TO_MESSAGE)
+        custom = notification.get("email_smtp", "")
+        if (((isinstance(custom, str) and custom.strip()) or valid_email_address(address))
+                and email_smtp_endpoint(notification) is None):
+            errors.append(EMAIL_SMTP_MESSAGE)
+    for field in ("email_address", "email_to", "email_smtp"):
+        if not isinstance(notification.get(field, ""), str):
+            errors.append(f"notify.{field}: 必须为字符串")
     if "daily_confirm" in notification and type(notification["daily_confirm"]) is not bool:
         errors.append("notify.daily_confirm: 必须为布尔值")
     return errors

@@ -88,6 +88,23 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(BackendError):
             self.backend.save_config(self.request({"schedule": {"times": ["21:10"], "other": 1}}))
 
+    def test_email_channel_saves_plain_fields_and_keeps_the_code_private(self):
+        payload = {"notify": {"type": "email", "email_address": "  offline@qq.com ", "email_password": " abcd efgh ijkl mnop ",
+                              "email_to": "", "email_smtp": ""}}
+        result = self.backend.save_config(self.request(payload, clears=["notify.bark_url"]))
+        saved = json.loads(self.path.read_text())["notify"]
+        self.assertEqual(saved["email_password"], "abcdefghijklmnop")
+        self.assertEqual(saved["email_address"], "offline@qq.com")
+        self.assertEqual(saved["bark_url"], "")
+        self.assertTrue(result["configured"]["email_password"])
+        self.assertEqual(result["config"]["notify"]["email_address"], "offline@qq.com")
+        self.assertNotIn("abcdefghijklmnop", json.dumps(result))
+        self.assertNotIn("abcdefghijklmnop", json.dumps(self.backend.get_status()))
+        draft = self.backend.save_config(self.request({"notify": {"type": "email", "email_address": "offline@qq.com", "email_password": ""}}))
+        self.assertTrue(draft["configured"]["email_password"], "a blank code keeps the stored one")
+        with self.assertRaises(BackendError):
+            self.backend.save_config(self.request({"notify": {"type": "email", "email_address": "broken", "email_password": ""}}))
+
     def test_clear_is_explicit_and_invalidates_cached_token(self):
         save_token(load_config(), "TEST_SESSION_TOKEN_PRIVATE_123456")
         self.backend.save_config(self.request(clears=["user.password", "user.token", "notify.bark_url"]))

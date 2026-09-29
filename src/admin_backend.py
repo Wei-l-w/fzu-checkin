@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import threading
@@ -17,11 +18,13 @@ from src.checkin import SafeCheckinError, beijing_now
 from src.config import (CONFIG_PATH, ConfigError, _read_private, atomic_write_json,
                         load_config, state_dir, validation_errors)
 from src.config import DEFAULT_SCHEDULE_TIMES, normalize_token, schedule_times
+from src.config import EMAIL_ADDRESS_MESSAGE, EMAIL_PASSWORD_MESSAGE
 from src.admin_auth import valid_user_id
 from src.history import read_history, record_event, safe_result
 
 SECRET_PATHS = frozenset({"user.password", "user.token", "notify.bark_url",
-                          "notify.serverchan_key", "notify.wecom_webhook"})
+                          "notify.serverchan_key", "notify.wecom_webhook", "notify.email_password"})
+EMAIL_TEXT_PATHS = frozenset({"notify.email_address", "notify.email_to", "notify.email_smtp"})
 ACTIONS = frozenset({"pause", "resume", "preflight", "notify-test"})
 
 
@@ -50,7 +53,8 @@ def default_profile_config():
             "checkin": {"coordinate_system": "GCJ-02", "confirmed": False, "longitude": "",
                         "latitude": "", "actual_location": ""},
             "skip_dates": [], "vacation": {"notify": False, "skip_ranges": []},
-            "notify": {"type": "none", "bark_url": "", "serverchan_key": "", "wecom_webhook": "", "daily_confirm": False},
+            "notify": {"type": "none", "bark_url": "", "serverchan_key": "", "wecom_webhook": "",
+                       "email_address": "", "email_password": "", "email_to": "", "email_smtp": "", "daily_confirm": False},
             "schedule": {"times": list(DEFAULT_SCHEDULE_TIMES)}}
 
 
@@ -96,11 +100,13 @@ class Backend:
                 "checkin": {key: checkin.get(key, default) for key, default in
                             {"coordinate_system": "GCJ-02", "confirmed": False, "longitude": "",
                              "latitude": "", "actual_location": ""}.items()},
-                "notify": {"type": notification.get("type", "none")},
+                "notify": {"type": notification.get("type", "none"),
+                           **{key: notification.get(key, "") if isinstance(notification.get(key, ""), str) else ""
+                              for key in ("email_address", "email_to", "email_smtp")}},
                 "skip_dates": raw.get("skip_dates", []),
                 "vacation": {"skip_ranges": (raw.get("vacation") or {}).get("skip_ranges", [])}}
         flags = {"password": bool(user.get("password")), "token": bool(user.get("token")),
-                 **{key: bool(notification.get(key)) for key in ("bark_url", "serverchan_key", "wecom_webhook")}}
+                 **{key: bool(notification.get(key)) for key in ("bark_url", "serverchan_key", "wecom_webhook", "email_password")}}
         try:
             effective = load_config(self.path)
             flags["token"] = bool((effective.get("user") or {}).get("token"))
@@ -121,7 +127,8 @@ class Backend:
         result = copy.deepcopy(raw)
         allowed = {"user": {"username", "password", "token"},
                    "checkin": {"longitude", "latitude", "actual_location", "coordinate_system", "confirmed"},
-                   "notify": {"type", "bark_url", "serverchan_key", "wecom_webhook"},
+                   "notify": {"type", "bark_url", "serverchan_key", "wecom_webhook",
+                              "email_address", "email_password", "email_to", "email_smtp"},
                    "vacation": {"skip_ranges"}, "schedule": {"times"}}
         for section, value in fields.items():
             if section in allowed:
@@ -134,6 +141,9 @@ class Backend:
                     if path in SECRET_PATHS:
                         if not isinstance(item, str):
                             raise BackendError("invalid_secret", "凭据必须为文本。")
+                        if path == "notify.email_password":
+                            # Providers show codes in groups ("abcd efgh ..."); SMTP needs them joined.
+                            item = re.sub(r"\s+", "", item)
                         if item and path in clears:
                             raise BackendError("invalid_clear", "同一凭据不能同时填写和清除。")
                         if item == "":
@@ -141,6 +151,8 @@ class Backend:
                         if path == "user.token":
                             # A stale page may send the whole post-login URL; keep only the token.
                             item = normalize_token(item)
+                    elif path in EMAIL_TEXT_PATHS and isinstance(item, str):
+                        item = item.strip()
                     result[section][key] = item
             else:
                 result[section] = value
@@ -164,6 +176,11 @@ class Backend:
                              "wecom_webhook": "需要有效的 HTTPS 推送地址"}.items():
             if notification.get(key, "") == "":
                 missing.add(f"notify.{key}: {message}")
+        # Drafts may leave the email channel half-filled; malformed values are still rejected.
+        if notification.get("email_password", "") == "":
+            missing.add(EMAIL_PASSWORD_MESSAGE)
+        if notification.get("email_address", "") == "":
+            missing.add(EMAIL_ADDRESS_MESSAGE)
         invalid = [error for error in errors if error not in missing]
         if invalid:
             # These are fixed validation strings, never supplied values.

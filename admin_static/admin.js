@@ -7,7 +7,8 @@
     { path: 'user.token', key: 'token', input: 'school-token', clear: 'clear-token', saved: 'token-saved' },
     { path: 'notify.bark_url', key: 'bark_url', input: 'bark-url', clear: 'clear-bark', saved: 'bark-saved', channel: 'bark' },
     { path: 'notify.serverchan_key', key: 'serverchan_key', input: 'serverchan-key', clear: 'clear-serverchan', saved: 'serverchan-saved', channel: 'serverchan' },
-    { path: 'notify.wecom_webhook', key: 'wecom_webhook', input: 'wecom-webhook', clear: 'clear-wecom', saved: 'wecom-saved', channel: 'wecom' }
+    { path: 'notify.wecom_webhook', key: 'wecom_webhook', input: 'wecom-webhook', clear: 'clear-wecom', saved: 'wecom-saved', channel: 'wecom' },
+    { path: 'notify.email_password', key: 'email_password', input: 'email-password', clear: 'clear-email', saved: 'email-saved', channel: 'email', placeholder: '邮箱设置里生成的授权码，不是登录密码' }
   ];
   const labels = {
     confirmed: { title: '学校已确认签到', badge: '学校确认', tone: 'success', detail: '提交后已复核学校当天记录，确认签到成功。' },
@@ -459,7 +460,10 @@
     $('actual-location').value = safeText(checkin.actual_location);
     $('location-confirmed').checked = checkin.confirmed === true;
     $('service-enabled').checked = config.enabled === true;
-    $('notify-type').value = ['none', 'bark', 'serverchan', 'wecom'].includes(notify.type) ? notify.type : 'none';
+    $('notify-type').value = ['none', 'bark', 'serverchan', 'wecom', 'email'].includes(notify.type) ? notify.type : 'none';
+    $('email-address').value = safeText(notify.email_address);
+    $('email-to').value = safeText(notify.email_to);
+    $('email-smtp').value = safeText(notify.email_smtp);
     $('skip-dates').value = Array.isArray(config.skip_dates) ? config.skip_dates.filter((date) => typeof date === 'string').join('\n') : '';
     const scheduleTimes = config.schedule && Array.isArray(config.schedule.times) ? config.schedule.times.filter((item) => typeof item === 'string') : [];
     $('schedule-times-input').value = scheduleTimes.join(' ');
@@ -470,7 +474,7 @@
     secretFields.forEach((field) => {
       const exists = configured[field.key] === true;
       $(field.input).value = '';
-      $(field.input).placeholder = exists ? '已保存；留空保留，不回显' : (field.channel ? '填写本人的通知地址或密钥' : '粘贴登录后地址栏的整段链接');
+      $(field.input).placeholder = exists ? '已保存；留空保留，不回显' : (field.channel ? (field.placeholder || '填写本人的通知地址或密钥') : '粘贴登录后地址栏的整段链接');
       $(field.clear).checked = false;
       $(field.saved).textContent = exists ? '已保存 · 不回显' : '未保存';
       $(field.saved).classList.toggle('is-saved', exists);
@@ -539,6 +543,11 @@
       vacation: { skip_ranges: ranges },
       schedule: { times: parseScheduleTimes($('schedule-times-input').value) }
     };
+    if (config.notify.type === 'email') {
+      config.notify.email_address = $('email-address').value.trim();
+      config.notify.email_to = $('email-to').value.trim();
+      config.notify.email_smtp = $('email-smtp').value.trim();
+    }
     const clearSecrets = [];
     secretFields.forEach((field) => {
       if ($(field.clear).checked || (field.channel && field.channel !== config.notify.type)) {
@@ -778,8 +787,8 @@
     if (role === 'owner') loadMembers().catch(handleError);
   }
 
-  const notifyNames = { none: '未启用', bark: 'Bark', serverchan: 'Server酱', wecom: '企业微信' };
-  const notifyKeys = { bark: 'bark_url', serverchan: 'serverchan_key', wecom: 'wecom_webhook' };
+  const notifyNames = { none: '未启用', bark: 'Bark', serverchan: 'Server酱', wecom: '企业微信', email: '邮箱' };
+  const notifyKeys = { bark: 'bark_url', serverchan: 'serverchan_key', wecom: 'wecom_webhook', email: 'email_password' };
   function updateSubSummaries() {
     const dates = $('skip-dates').value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length;
     const ranges = $('date-ranges').children.length;
@@ -790,7 +799,7 @@
     const notify = $('notify-summary');
     if (type === 'none' || !notifyNames[type]) { notify.textContent = '未启用'; notify.classList.remove('is-set'); return; }
     const saved = configured[notifyKeys[type]] === true;
-    const typed = $({ bark: 'bark-url', serverchan: 'serverchan-key', wecom: 'wecom-webhook' }[type]).value !== '';
+    const typed = $({ bark: 'bark-url', serverchan: 'serverchan-key', wecom: 'wecom-webhook', email: 'email-password' }[type]).value !== '';
     notify.textContent = `${notifyNames[type]} · ${saved || typed ? (typed ? '待保存' : '已保存') : '待填写'}`;
     notify.classList.toggle('is-set', saved || typed);
   }

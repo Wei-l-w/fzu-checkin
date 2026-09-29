@@ -101,3 +101,5 @@ sudo /opt/fzu-checkin/rollback/ui-20260918T161349Z/rollback-ui.sh
 
 登录表单增加用户名（管理员为 admin）；页头显示“当前登录：<名> · 管理员/成员”。页底新增“我的账户”（改本页密码）与仅管理员可见的“成员管理”（列表、添加、重置密码、移除）。接口：`GET/POST users`、`POST users/<名>/password|remove`（仅 owner）、`PUT password`（本人）。浏览器测试新增成员/管理员视图用例。
 同晚补充：“学校登录（Token）”卡片内新增“怎么获取 Token”四步说明，含可点开的学校登录页链接（`#sso-link`，noopener/noreferrer，service 参数指向晚点名回调）和“复制网址”按钮；纯前端，无需重启。
+
+2026-09-30：新增邮箱通知渠道（SMTP，465 隐式 TLS / 587 STARTTLS，校验证书）。QQ/163/126/Gmail 按域名自动识别服务器，其他邮箱手填；授权码作为密钥保存、不回显，保存时去除空白；自定义服务器禁止 IP 地址与非 465/587 端口。

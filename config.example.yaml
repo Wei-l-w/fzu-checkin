@@ -32,8 +32,12 @@ vacation:
 # 真正提交还必须通过学校当天计划、允许校区和现有服务端范围校验。
 
 notify:
-  type: "none"          # none | bark | serverchan | wecom，只选一种
+  type: "none"          # none | bark | serverchan | wecom | email，只选一种
   bark_url: ""          # 本人的HTTPS Bark推送完整地址，包含私钥
   serverchan_key: ""    # 本人的Server酱Turbo SendKey
   wecom_webhook: ""     # 本人的企业微信机器人HTTPS webhook
+  email_address: ""     # 发件邮箱，也是 SMTP 登录账号，如 123456@qq.com
+  email_password: ""    # SMTP 授权码（邮箱设置里生成，不是登录密码）
+  email_to: ""          # 收件邮箱，留空则发给自己
+  email_smtp: ""        # 留空自动识别 QQ/163/126/Gmail；其他邮箱填 smtp.example.com 或 smtp.example.com:587
   daily_confirm: false

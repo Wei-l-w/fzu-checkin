@@ -1,0 +1,39 @@
+# 私有配置位置：/var/lib/fzu-checkin/profiles/<用户名>/config.yaml（目录0700，文件0600）。管理页保存的是同等内容的 JSON。
+# 不把账号、密码、Token、推送密钥写入聊天、命令行、日志或Git。
+# 填写后先执行只读预检；本人确认符合学校要求后才可启用定时任务。
+enabled: false
+
+user:
+  # token 或完整的 username/password 至少提供一种。
+  # 仅使用Token时，过期后可能需要人工更新；验证码/人脸须在官方应用处理。
+  token: ""
+  username: ""
+  password: ""
+  # 自动获取的Token仅存入私有 state/session.json，不改写本文件。
+
+checkin:
+  # 固定坐标没有手机实时定位能力；配置被接受不等于本人实时在校。
+  # 必须由本人提供并核对高德GCJ-02坐标及地址，不可混用WGS84或虚构校内位置。
+  coordinate_system: "GCJ-02"
+  confirmed: false
+  longitude: ""
+  latitude: ""
+  actual_location: ""
+
+# 个人离校/请假日期，一行一个YYYY-MM-DD，均按北京时间判定。
+# 示例格式见维护文档；初始不预填任何未经本人确认的假期。
+skip_dates: []
+vacation:
+  notify: false
+  skip_ranges: []
+  # 每项填写 name、start、end；起止日期均包含在跳过区间内。
+
+# 不允许设置campus.bounds扩大或替换内置粗筛范围。
+# 真正提交还必须通过学校当天计划、允许校区和现有服务端范围校验。
+
+notify:
+  type: "none"          # none | bark | serverchan | wecom，只选一种
+  bark_url: ""          # 本人的HTTPS Bark推送完整地址，包含私钥
+  serverchan_key: ""    # 本人的Server酱Turbo SendKey
+  wecom_webhook: ""     # 本人的企业微信机器人HTTPS webhook
+  daily_confirm: false

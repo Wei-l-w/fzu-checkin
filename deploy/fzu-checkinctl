@@ -1,0 +1,128 @@
+#!/bin/bash
+# 多档案版本：命令后跟档案名（即登录用户名，缺省 admin）。不接受凭据参数。
+set -euo pipefail
+if [[ $EUID -ne 0 ]]; then
+    echo '请使用 sudo fzu-checkinctl <命令> [档案名]' >&2
+    exit 1
+fi
+CMD="${1:-status}"
+PROFILE="${2:-admin}"
+if ! [[ "$PROFILE" =~ ^[a-z][a-z0-9_]{1,23}$ ]]; then
+    echo '档案名需为 2–24 位小写字母、数字或下划线，且以字母开头' >&2
+    exit 2
+fi
+BASE=/var/lib/fzu-checkin/profiles/$PROFILE
+if [[ "$CMD" != user-* && ! -f "$BASE/config.yaml" ]]; then
+    echo "档案 $PROFILE 不存在（$BASE/config.yaml）" >&2
+    exit 2
+fi
+run_private() {
+    /usr/sbin/runuser -u fzu-checkin -- /usr/bin/env -i \
+        PATH=/usr/bin:/bin LANG=C.UTF-8 TZ=Asia/Shanghai \
+        PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+        FZU_CHECKIN_CONFIG="$BASE/config.yaml" \
+        FZU_CHECKIN_STATE_DIR="$BASE/state" \
+        /opt/fzu-checkin/venv/bin/python /opt/fzu-checkin/main.py "$1"
+}
+run_admin() {
+    # 本地账户管理：隐藏输入，不在命令行传密码。
+    /usr/sbin/runuser -u fzu-checkin -- /usr/bin/env -i \
+        PATH=/usr/bin:/bin LANG=C.UTF-8 TZ=Asia/Shanghai \
+        PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+        FZU_ADMIN_USERS_FILE=/var/lib/fzu-checkin/users/users.json \
+        /opt/fzu-checkin/venv/bin/python /opt/fzu-checkin/admin_server.py "$@"
+}
+schedule_control() {
+    # Root owns the directory and lock; never truncate/follow a service-user
+    # symlink. The broker need not be running for these local CLI controls.
+    /usr/bin/python3 -I -B - "$1" "$PROFILE" <<'PY'
+import fcntl
+import os
+import pwd
+import subprocess
+import sys
+
+sys.path.insert(0, "/opt/fzu-checkin")
+from control_broker import (secure_runtime_directory, open_root_lock, read_schedule_times, apply_schedule,
+                            profile_exists, profile_config_path, timer_unit, service_unit, timer_dropin, PROFILES_ROOT)
+
+command, profile = sys.argv[1], sys.argv[2]
+if not profile_exists(profile):
+    print("档案不存在", file=sys.stderr)
+    raise SystemExit(2)
+directory_fd = secure_runtime_directory(pwd.getpwnam("fzu-checkin").pw_gid)
+lock_fd = open_root_lock(directory_fd, "schedule.lock")
+try:
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    if command == "pause":
+        subprocess.run(["/usr/bin/systemctl", "disable", "--now", timer_unit(profile)], check=True)
+        subprocess.run(["/usr/bin/systemctl", "stop", service_unit(profile)], check=True)
+    elif command == "resume":
+        if os.path.lexists(PROFILES_ROOT / profile / "state" / "paused"):
+            print("预检后出现新的暂停，未启用timer。", file=sys.stderr)
+            raise SystemExit(1)
+        def fail_closed(message):
+            print(message, file=sys.stderr)
+            subprocess.run([
+                "/usr/sbin/runuser", "-u", "fzu-checkin", "--", "/usr/bin/env", "-i",
+                "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "TZ=Asia/Shanghai",
+                "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1",
+                "FZU_CHECKIN_CONFIG=" + str(profile_config_path(profile)),
+                "FZU_CHECKIN_STATE_DIR=" + str(PROFILES_ROOT / profile / "state"),
+                "/opt/fzu-checkin/venv/bin/python", "/opt/fzu-checkin/main.py", "pause"
+            ], check=False)
+            raise SystemExit(1)
+        try:
+            # Times come only from this profile's private config, validated again here as root.
+            apply_schedule(read_schedule_times(profile_config_path(profile)), dropin=timer_dropin(profile))
+        except Exception:
+            fail_closed("签到时间配置无效或timer无法更新，已重新暂停。")
+        if subprocess.run(["/usr/bin/systemctl", "enable", "--now", timer_unit(profile)]).returncode:
+            fail_closed("启用timer失败，已重新暂停。")
+        if subprocess.run(["/usr/bin/systemctl", "restart", timer_unit(profile)]).returncode:
+            fail_closed("timer重载失败，已重新暂停。")
+        subprocess.run(["/usr/bin/systemctl", "list-timers", timer_unit(profile), "--no-pager"], check=True)
+    else:
+        raise SystemExit(2)
+finally:
+    os.close(lock_fd)
+    os.close(directory_fd)
+PY
+}
+case "$CMD" in
+    status)
+        systemctl show "fzu-checkin@$PROFILE.timer" -p ActiveState -p UnitFileState -p NextElapseUSecRealtime -p TimersCalendar
+        systemctl show "fzu-checkin@$PROFILE.service" -p ActiveState -p Result -p ExecMainStatus
+        run_private status
+        ;;
+    preflight)
+        result=0
+        systemctl start "fzu-checkin-preflight@$PROFILE.service" || result=$?
+        journalctl -u "fzu-checkin-preflight@$PROFILE.service" -n 10 --no-pager
+        exit "$result"
+        ;;
+    pause)
+        # 先落暂停标记，再停止本档案timer及正在执行的进程；不触碰其他档案。
+        result=0
+        run_private pause || result=$?
+        schedule_control pause
+        exit "$result"
+        ;;
+    resume)
+        # 需要本档案enabled:true，且每次恢复都先完成不提交签到的学校预检。
+        run_private resume
+        schedule_control resume
+        ;;
+    notify-test) run_private notify-test ;;
+    logs) journalctl -u "fzu-checkin@$PROFILE.service" -u "fzu-checkin-preflight@$PROFILE.service" -n 80 --no-pager ;;
+    run)
+        echo "将按档案 $PROFILE 的启用/暂停配置和学校当日条件运行；可能真实提交签到。"
+        systemctl start "fzu-checkin@$PROFILE.service"
+        journalctl -u "fzu-checkin@$PROFILE.service" -n 10 --no-pager
+        ;;
+    user-list) run_admin user-list ;;
+    user-add) run_admin user-add "$PROFILE" ;;
+    user-password) run_admin user-password "$PROFILE" ;;
+    user-remove) run_admin user-remove "$PROFILE" ;;
+    *) echo '命令：status | preflight(只读) | pause | resume(只读预检后启用timer) | notify-test | logs | run(可能实签) | user-list | user-add <名> | user-password <名> | user-remove <名>；档案名缺省 admin' >&2; exit 2 ;;
+esac

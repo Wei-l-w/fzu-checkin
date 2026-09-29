@@ -1,0 +1,20 @@
+# ---- 敏感信息，勿提交 ----
+config.yaml
+config.yml
+
+# ---- Python ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ---- 运行时 ----
+*.log
+.DS_Store
+state/
+rollback/
+
+# ---- 本地临时 ----
+*.tmp
+node_modules/
+.pytest_cache/

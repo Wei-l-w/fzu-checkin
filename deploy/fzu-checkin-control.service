@@ -1,0 +1,47 @@
+[Unit]
+Description=FZU private allowlisted management control broker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=fzu-checkin
+WorkingDirectory=/opt/fzu-checkin
+ExecStart=/opt/fzu-checkin/venv/bin/python /opt/fzu-checkin/control_broker.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+RuntimeDirectory=fzu-checkin-control
+RuntimeDirectoryMode=0750
+# Preserve the lock inode if the UI broker restarts while the CLI is running.
+RuntimeDirectoryPreserve=yes
+UMask=0077
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=15s
+KillMode=control-group
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_AUDIT_WRITE CAP_KILL
+# Preserve this already-bounded capability across sandbox setup and fixed CLI
+# execs; runuser drops it when entering the unprivileged school-client process.
+AmbientCapabilities=CAP_SETUID
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/run/fzu-checkin-control /var/lib/fzu-checkin
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

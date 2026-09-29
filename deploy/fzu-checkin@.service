@@ -1,0 +1,48 @@
+[Unit]
+Description=FZU evening attendance for profile %i (submission guarded by private config)
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=oneshot
+User=fzu-checkin
+Group=fzu-checkin
+WorkingDirectory=/opt/fzu-checkin
+Environment=FZU_CHECKIN_CONFIG=/var/lib/fzu-checkin/profiles/%i/config.yaml
+Environment=FZU_CHECKIN_STATE_DIR=/var/lib/fzu-checkin/profiles/%i/state
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=Asia/Shanghai
+ExecStart=/opt/fzu-checkin/venv/bin/python /opt/fzu-checkin/main.py run
+TimeoutStartSec=180
+TimeoutStopSec=15
+KillMode=control-group
+Restart=no
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fzu-checkin
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=256M
+TasksMax=32
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fzu-checkin@%i
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=50

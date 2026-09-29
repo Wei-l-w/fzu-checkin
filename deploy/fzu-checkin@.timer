@@ -1,0 +1,12 @@
+[Unit]
+Description=FZU evening attendance timer for profile %i (default 21:35,21:40,21:50 Beijing time)
+
+[Timer]
+OnCalendar=*-*-* 21:35,40,50:00 Asia/Shanghai
+Unit=fzu-checkin@%i.service
+Persistent=false
+AccuracySec=1s
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

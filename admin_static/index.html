@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>福州大学晚点名 · 签到管理</title>
+  <link rel="stylesheet" href="./admin.css">
+  <script src="./location.js" defer></script>
+  <script src="./admin.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳至主要内容</a>
+  <div class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="签到管理首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 28 28" fill="none"><rect x="5" y="5" width="18" height="18" rx="5" stroke="currentColor" stroke-width="1.6"/><path d="m9 14 3.4 3.5L19 11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="brand-text">福州大学晚点名 <span class="brand-subtitle">签到管理</span></span>
+      </a>
+      <div class="header-side">
+        <span id="private-label" class="header-caption">PRIVATE CONSOLE</span>
+        <span id="current-user" class="current-user" hidden></span>
+        <button id="logout-button" class="button button-quiet button-small" type="button" hidden>退出登录</button>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <noscript><div class="notice notice-warning">此管理页面需要启用 JavaScript；未启用时不会修改配置或执行操作。</div></noscript>
+      <div id="feedback" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section id="login-view" class="login-layout" aria-labelledby="login-title">
+        <div class="card login-card">
+          <span class="section-kicker">管理员入口</span>
+          <h2 id="login-title">登录签到管理</h2>
+          <p class="muted">这里填写签到管理页的用户名和密码，<strong>不是学校账号</strong>。</p>
+          <form id="login-form" autocomplete="off">
+            <div class="field">
+              <label for="admin-username">用户名</label>
+              <input id="admin-username" name="admin-username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="24" placeholder="登录用户名">
+            </div>
+            <div class="field">
+              <label for="admin-password">密码</label>
+              <input id="admin-password" name="admin-password" type="password" autocomplete="current-password" required maxlength="1024" placeholder="输入密码" aria-describedby="login-help">
+            </div>
+            <button id="login-button" class="button button-primary button-full" type="submit">登录管理页面</button>
+            <p id="login-help" class="field-hint">每位成员使用自己的用户名和密码，登录后只能看到和管理自己的签到配置。请只在本人信任的设备上操作。</p>
+          </form>
+          <ul class="login-notes">
+            <li>预检与真实签到明确区分</li>
+            <li>保存配置后保持暂停，需手动恢复</li>
+            <li>密码、Token 与推送密钥不回显</li>
+          </ul>
+        </div>
+      </section>
+
+      <div id="app-view" hidden>
+        <section class="page-heading">
+          <div><span class="eyebrow">福州大学 · 晚点名</span><h1>签到管理</h1><p id="today-display" class="muted">正在读取北京时间…</p></div>
+          <div class="refresh-note"><span id="connection-dot" class="small-dot"></span><span id="refresh-state">每 10 秒刷新状态</span></div>
+        </section>
+
+        <section class="status-strip" aria-label="签到与定时状态">
+          <div id="today-card" class="card result-card tone-neutral">
+            <div class="card-topline"><h2>今日签到情况</h2><span id="result-badge" class="badge">尚未验证</span></div>
+            <p id="result-title" class="result-title">尚未验证</p>
+            <p id="result-description" class="muted result-description">还没有学校记录的验证结果，不能认定已签到。</p>
+            <div class="result-meta"><span id="result-date">数据日期：暂无</span><span id="result-source">来源：暂无</span></div>
+          </div>
+          <div class="card schedule-card">
+            <div class="card-topline"><h2>自动签到计划</h2><span id="schedule-badge" class="badge">读取中</span></div>
+            <p id="schedule-title" class="schedule-title">正在确认定时状态</p>
+            <dl class="schedule-details">
+              <div><dt>计划时间</dt><dd id="schedule-times">21:35 / 21:40 / 21:50</dd></div>
+              <div><dt>下次运行</dt><dd id="next-run">尚未确认</dd></div>
+              <div><dt>运行授权</dt><dd id="enabled-state">尚未确认</dd></div>
+            </dl>
+            <p class="field-hint">北京时间。第一个时点签到，后面的时点只在未成功时复核重试。时间在下方“签到时间”里改。</p>
+          </div>
+          <div class="card control-card" aria-labelledby="control-title">
+            <div class="card-topline"><h2 id="control-title">运行控制</h2><span class="badge badge-plain">保存 → 预检 → 恢复</span></div>
+            <p id="control-state" class="control-state" role="status" aria-live="polite">当前状态：读取中…</p>
+            <div class="action-buttons">
+              <button class="button button-secondary" type="button" data-action="preflight">只读预检</button>
+              <button class="button button-primary" type="button" data-action="resume">恢复定时</button>
+              <button class="button button-quiet" type="button" data-action="pause">暂停定时</button>
+            </div>
+            <p id="control-help" class="field-hint control-help">预检只查询学校服务，不会提交签到。此页面没有即时签到按钮。</p>
+            <div id="job-banner" class="notice notice-info" role="status" aria-live="polite" hidden></div>
+            <div class="preflight-line"><span>最近预检</span><span id="preflight-summary">尚无预检记录</span></div>
+          </div>
+        </section>
+
+        <section id="configuration" class="configuration-section" aria-labelledby="configuration-title">
+          <div class="section-heading"><div><span class="eyebrow">CONFIGURATION</span><h2 id="configuration-title">账号与签到配置</h2><p class="muted">所有配置都在这一页；修改后点底部“保存配置并暂停”。</p></div><span id="draft-state" class="draft-state">已保存配置</span></div>
+
+          <form id="config-form" autocomplete="off">
+            <fieldset id="config-fields" class="config-fields" disabled>
+              <legend class="sr-only">签到服务配置</legend>
+              <div class="config-grid">
+                <section class="card form-card" aria-labelledby="account-title">
+                  <div class="numbered-heading"><span class="section-number">01</span><div><h3 id="account-title">学校登录（Token）</h3><p class="muted">在浏览器登录智汇福大后，粘贴地址栏链接。</p></div></div>
+                  <div class="field secret-field">
+                    <div class="label-line"><label for="school-token">学校 Token</label><span id="token-saved" class="secret-status">未保存</span></div>
+                    <input id="school-token" name="school-token" type="password" autocomplete="new-password" maxlength="8192" placeholder="粘贴登录后地址栏的整段链接" aria-describedby="token-hint">
+                    <div class="secret-footer"><span id="token-hint" class="field-hint">在手机或电脑浏览器登录学校，复制地址栏整段链接粘到这里，保存时只保留 token。</span><label class="compact-check"><input id="clear-token" type="checkbox">清除已存 Token</label></div>
+                  </div>
+                  <div class="token-guide">
+                    <p class="token-guide-title">怎么获取 Token</p>
+                    <ol>
+                      <li>用手机 Safari 或电脑浏览器打开学校登录页：<a id="sso-link" class="sso-link" href="https://sso.fzu.edu.cn/login?service=https%3A%2F%2Fyzsxg.fzu.edu.cn%2Flivecloud%2Fproject%2Ffzu%2Fattn%2Foauth2%2Fcallback.action" target="_blank" rel="noopener noreferrer">打开智汇福大登录页</a><button id="copy-sso-link" class="button button-small button-quiet" type="button">复制网址</button></li>
+                      <li>用学号和密码登录；学校要求短信验证码时照做。</li>
+                      <li>登录成功会跳到晚点名签到页。点一下地址栏，把整段网址复制下来（iPhone：点地址栏 → 拷贝）。</li>
+                      <li>回到这里，把整段网址粘贴到上面的“学校 Token”框，点底部“保存配置并暂停”，再依次点“只读预检”“恢复定时”。</li>
+                    </ol>
+                    <p class="field-hint">网址只保留 token 部分，不会保存学校账号密码。Token 过期时预检会显示“学校认证未通过”，重复以上步骤即可。</p>
+                  </div>
+                </section>
+
+                <section class="card form-card" aria-labelledby="location-title">
+                  <div class="numbered-heading"><span class="section-number">02</span><div><h3 id="location-title">签到位置</h3><p class="muted">GCJ-02 坐标；固定坐标不代表实时在校。</p></div></div>
+                  <div class="location-tools">
+                    <div id="location-actions" class="location-actions">
+                      <button id="locate-button" class="button button-secondary" type="button" aria-describedby="locate-help">手机获取当前位置</button>
+                      <button id="map-button" class="button button-secondary" type="button" aria-describedby="map-privacy-note">打开高德核对</button>
+                    </div>
+                    <p id="locate-help" class="field-hint">定位只在点击后请求一次；iPhone 请用 Safari 并允许定位。</p>
+                    <p id="map-privacy-note" class="field-hint">打开地图只发送当前坐标，不发送账号、密码和地址。</p>
+                    <div id="location-status" class="notice notice-info location-status" role="status" aria-live="polite" hidden>
+                      <span id="location-message"></span>
+                      <span id="location-meta" class="location-meta" hidden></span>
+                      <strong id="location-draft-note" class="location-draft-note" hidden></strong>
+                      <button id="cancel-locate-button" class="button button-small button-quiet location-cancel" type="button" hidden>取消本次定位</button>
+                    </div>
+                  </div>
+                  <div class="three-fields">
+                    <div class="field"><label for="coordinate-system">坐标系</label><input id="coordinate-system" type="text" value="GCJ-02" readonly tabindex="-1"></div>
+                    <div class="field"><label for="longitude">经度</label><input id="longitude" name="longitude" type="number" inputmode="decimal" step="any" min="-180" max="180" placeholder="119.xxxxxx"></div>
+                    <div class="field"><label for="latitude">纬度</label><input id="latitude" name="latitude" type="number" inputmode="decimal" step="any" min="-90" max="90" placeholder="26.xxxxxx"></div>
+                  </div>
+                  <div class="field"><label for="actual-location">真实地址</label><textarea id="actual-location" name="actual-location" rows="2" maxlength="500" placeholder="校区、楼栋等具体地址"></textarea><p class="field-hint">地址由本人填写；改地址不影响位置确认，改坐标需重新确认。</p></div>
+                  <label class="check-block"><input id="location-confirmed" type="checkbox"><span>我已核对坐标系、坐标及真实地址，并理解固定坐标不代表实时在校。</span></label>
+                </section>
+
+                <div class="form-column">
+                  <section class="card form-card" aria-labelledby="schedule-config-title">
+                    <div class="numbered-heading"><span class="section-number">03</span><div><h3 id="schedule-config-title">签到时间</h3><p class="muted">每晚自动运行的北京时间时点。</p></div></div>
+                    <div class="field"><label for="schedule-times-input">运行时点 <span class="label-extra">空格分隔，最多 6 个</span></label><input id="schedule-times-input" name="schedule-times" type="text" inputmode="numeric" autocomplete="off" autocapitalize="none" maxlength="60" placeholder="21:35 21:40 21:50（留空即默认）" aria-describedby="schedule-input-hint"></div>
+                    <p id="schedule-input-hint" class="field-hint">范围 21:00–23:55，按先后顺序。第一个时点签到，其余只在未成功时重试；22:30 后学校记迟到。改后需保存、预检并恢复定时。</p>
+                  </section>
+
+                  <section class="card form-card" aria-labelledby="skip-title">
+                    <div class="numbered-heading"><span class="section-number">04</span><div><h3 id="skip-title">离校 / 请假日期</h3><p class="muted">命中的日期跳过自动签到。</p></div></div>
+                    <div class="field"><label for="skip-dates">单独日期 <span class="label-extra">一行一个</span></label><textarea id="skip-dates" name="skip-dates" class="date-lines" rows="2" placeholder="YYYY-MM-DD" autocapitalize="none" spellcheck="false" aria-describedby="skip-dates-hint"></textarea><p id="skip-dates-hint" class="field-hint">按北京时间判断，留空即不设置。</p></div>
+                    <div class="label-line range-heading"><span class="field-label">连续日期区间</span><button id="add-range" class="button button-small button-quiet" type="button">＋ 添加区间</button></div>
+                    <div id="date-ranges" class="date-ranges"></div>
+                    <p id="range-empty" class="empty-inline">暂未设置日期区间（含起止当天）</p>
+                  </section>
+
+                  <section class="card form-card" aria-labelledby="notify-title">
+                    <div class="numbered-heading"><span class="section-number">05</span><div><h3 id="notify-title">签到通知</h3><p class="muted">一种渠道即可，密钥不回显。</p></div></div>
+                    <div class="field"><label for="notify-type">通知渠道</label><select id="notify-type" name="notify-type"><option value="none">不启用通知</option><option value="bark">Bark（iPhone）</option><option value="serverchan">Server酱</option><option value="wecom">企业微信机器人</option></select></div>
+                    <div class="field secret-field" data-notify="bark" hidden><div class="label-line"><label for="bark-url">Bark 完整推送地址</label><span id="bark-saved" class="secret-status">未保存</span></div><input id="bark-url" type="password" autocomplete="new-password" maxlength="4096" placeholder="含私钥的 HTTPS 地址" aria-describedby="bark-hint"><div class="secret-footer"><span id="bark-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-bark" type="checkbox">清除已存地址</label></div></div>
+                    <div class="field secret-field" data-notify="serverchan" hidden><div class="label-line"><label for="serverchan-key">Server酱 SendKey</label><span id="serverchan-saved" class="secret-status">未保存</span></div><input id="serverchan-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="本人的 SendKey" aria-describedby="serverchan-hint"><div class="secret-footer"><span id="serverchan-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-serverchan" type="checkbox">清除已存密钥</label></div></div>
+                    <div class="field secret-field" data-notify="wecom" hidden><div class="label-line"><label for="wecom-webhook">企业微信 Webhook</label><span id="wecom-saved" class="secret-status">未保存</span></div><input id="wecom-webhook" type="password" autocomplete="new-password" maxlength="4096" placeholder="含 key 的 HTTPS Webhook" aria-describedby="wecom-hint"><div class="secret-footer"><span id="wecom-hint" class="field-hint">留空保留已存值。</span><label class="compact-check"><input id="clear-wecom" type="checkbox">清除已存地址</label></div></div>
+                    <div class="notification-test"><button class="button button-secondary button-small" type="button" data-action="notify-test">发送测试通知</button><p class="field-hint">切换渠道并保存会清除其他渠道密钥；测试通知不会签到。</p></div>
+                  </section>
+                </div>
+              </div>
+
+              <div class="card authorization-card"><label class="check-block"><input id="service-enabled" type="checkbox"><span><strong>授权按计划执行自动签到</strong><span class="field-hint">我已确认账号、本人位置与学校要求，并同意服务在允许时段运行。勾选并保存不会自动恢复定时。</span></span></label></div>
+            </fieldset>
+
+            <section id="validation-box" class="notice notice-warning validation-box" aria-labelledby="validation-title" hidden><strong id="validation-title">已保存配置仍有待完善项目</strong><ul id="validation-list"></ul><p class="field-hint">可以先保存未完成的配置；定时保持暂停，修正后再预检。</p></section>
+            <div class="save-bar"><div><strong>保存后定时保持暂停</strong><p class="field-hint">先只读预检，再点“恢复定时”；不会立即签到。</p></div><button id="save-button" class="button button-primary" type="submit" disabled>保存配置并暂停</button></div>
+          </form>
+        </section>
+
+        <section id="records" class="records-section" aria-labelledby="records-title">
+          <details id="records-details" class="card records-card" open>
+            <summary class="records-summary"><span class="records-summary-text"><span class="eyebrow">ACTIVITY</span><h2 id="records-title">最近运行记录</h2></span><span class="section-aside">仅本服务事件 · 列表可滚动</span></summary>
+            <div class="history-scroll">
+              <ul id="history-list" class="history-list"></ul>
+              <div id="history-empty" class="empty-state"><span class="empty-mark" aria-hidden="true">—</span><strong>尚无运行记录</strong><p class="muted">首次预检或定时运行后，在这里查看结果。</p></div>
+            </div>
+            <p class="field-hint records-note">不是学校的签到数据库；只展示本服务留存的结果，成功以学校当天记录复核为准。</p>
+          </details>
+        </section>
+
+        <section id="account" class="account-section" aria-label="账户与成员">
+          <div class="account-grid">
+            <div class="card form-card">
+              <div class="numbered-heading"><span class="section-number">我</span><div><h3 id="account-section-title">我的账户</h3><p class="muted">修改本页登录密码，不是学校密码。</p></div></div>
+              <form id="password-form" autocomplete="off">
+                <div class="field"><label for="current-password">当前密码</label><input id="current-password" type="password" autocomplete="current-password" required maxlength="1024"></div>
+                <div class="two-fields">
+                  <div class="field"><label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" required minlength="10" maxlength="1024" placeholder="至少 10 个字符"></div>
+                  <div class="field"><label for="new-password-confirm">再次输入</label><input id="new-password-confirm" type="password" autocomplete="new-password" required minlength="10" maxlength="1024"></div>
+                </div>
+                <button id="password-button" class="button button-secondary" type="submit">修改密码</button>
+              </form>
+            </div>
+            <div id="members-card" class="card form-card" hidden>
+              <div class="numbered-heading"><span class="section-number">众</span><div><h3>成员管理</h3><p class="muted">仅管理员可见。每位成员用自己的用户名和密码登录，各自管理 Token、位置、时间和通知。</p></div></div>
+              <ul id="members-list" class="members-list"></ul>
+              <form id="member-form" autocomplete="off" class="member-form">
+                <div class="two-fields">
+                  <div class="field"><label for="member-username">用户名</label><input id="member-username" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" required maxlength="24" pattern="[a-z][a-z0-9_]{1,23}" placeholder="小写字母开头，如 zhangsan"></div>
+                  <div class="field"><label for="member-password">初始密码</label><input id="member-password" type="password" autocomplete="new-password" required minlength="10" maxlength="1024" placeholder="至少 10 个字符"></div>
+                </div>
+                <button id="member-button" class="button button-secondary" type="submit">添加成员</button>
+              </form>
+              <p class="field-hint">把用户名和初始密码告诉本人，请其登录后自行修改密码。移除成员会暂停其定时并停用登录，配置档案保留在服务器上。</p>
+            </div>
+          </div>
+        </section>
+
+        <details class="fine-print">
+          <summary>更多说明（隐私、定位与通知）</summary>
+          <ul>
+            <li>手机定位仅在点击后请求一次，浏览器内换算为 GCJ-02 填入草稿，不会持续跟踪；无法定位时检查系统“定位服务”和“精确位置”权限。</li>
+            <li>打开高德核对时只发送当前草稿坐标和固定标题，不发送学校账号、密码或真实地址；坐标为空时打开官方拾取器。游客视图可能只显示 2 位小数。</li>
+            <li>定位精度是设备估计，坐标换算也有误差，须本人核对。固定坐标不能证明本人实时在校；离校或请假请设置跳过日期或暂停定时。</li>
+            <li>预检可以登录或更新学校登录态、查询任务与范围，但不会提交签到；只有提交后复核到学校当天成功记录才显示“学校已确认”。</li>
+            <li>切换通知渠道后保存会清除其他渠道的密钥；选择“不启用通知”后保存会清除全部通知密钥。渠道受理不等于手机已收到。</li>
+          </ul>
+        </details>
+      </div>
+    </main>
+    <footer class="site-footer"><span>福州大学 · 个人私有服务</span><span>北京时间 · Asia/Shanghai</span></footer>
+  </div>
+</body>
+</html>

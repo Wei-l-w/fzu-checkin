@@ -1,0 +1,55 @@
+[Unit]
+Description=FZU private attendance management UI
+Requires=fzu-checkin-control.service
+After=network-online.target fzu-checkin-control.service
+
+[Service]
+Type=simple
+User=fzu-checkin
+Group=fzu-checkin
+WorkingDirectory=/opt/fzu-checkin
+Environment=FZU_ADMIN_ORIGIN=@ORIGIN@
+Environment=FZU_ADMIN_BASE_PATH=@BASE_PATH@
+Environment=FZU_ADMIN_PORT=@PORT@
+Environment=FZU_ADMIN_USERS_FILE=/var/lib/fzu-checkin/users/users.json
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=Asia/Shanghai
+ExecStart=/opt/fzu-checkin/venv/bin/python /opt/fzu-checkin/admin_server.py serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fzu-checkin
+ReadOnlyPaths=/var/lib/fzu-checkin/admin
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=384M
+TasksMax=48
+CPUQuota=75%
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fzu-checkin-web
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=40
+
+[Install]
+WantedBy=multi-user.target

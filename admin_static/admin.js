@@ -762,9 +762,15 @@
     const label = $('current-user');
     label.replaceChildren();
     if (id) {
+      const prefix = document.createElement('span');
+      prefix.className = 'current-user-prefix';
+      prefix.textContent = '当前登录：';
       const name = document.createElement('strong');
       name.textContent = id;
-      label.append('当前登录：', name, role === 'owner' ? ' · 管理员' : ' · 成员');
+      const roleText = document.createElement('span');
+      roleText.className = 'current-user-role';
+      roleText.textContent = role === 'owner' ? ' · 管理员' : ' · 成员';
+      label.append(prefix, name, roleText);
     }
     label.hidden = !id;
     $('members-card').hidden = role !== 'owner';

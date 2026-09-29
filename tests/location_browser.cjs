@@ -330,6 +330,7 @@ test('members see only their own account card while the owner also gets member m
   assert.equal(await member.page.locator('#members-card').isHidden(), true);
   assert.equal(await member.page.locator('#password-form').isVisible(), true);
   assert.equal(await member.page.locator('#current-user').textContent(), '当前登录：mate · 成员');
+  assert.equal(await member.page.locator('#current-user strong').textContent(), 'mate');
   assert.equal(await member.page.locator('#admin-username').count(), 1);
   assert.deepEqual(member.writes(), []);
   const owner = await fixture(t, { sessionUser: { id: 'admin', role: 'owner' } });

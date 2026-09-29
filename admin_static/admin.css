@@ -39,9 +39,11 @@ summary { cursor: pointer; }
 .page-shell { width: min(1280px, calc(100% - 48px)); margin-inline: auto; }
 .site-header { display: flex; align-items: center; justify-content: space-between; min-height: 64px; gap: 16px; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--brand); }
+.brand-text { white-space: nowrap; }
 .brand-mark { flex: 0 0 32px; width: 32px; height: 32px; border-radius: 9px; background: var(--brand); color: #fff; padding: 3px; }
 .brand-subtitle { display: inline-block; margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--brand-line); font-size: 12px; color: var(--muted); font-weight: 500; }
-.header-side { display: flex; align-items: center; gap: 12px; }
+.header-side { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+#logout-button { white-space: nowrap; }
 .current-user { font-size: 12px; color: var(--muted); }
 .current-user strong { color: var(--brand); font-weight: 650; }
 .header-caption, .eyebrow { font-size: 10px; letter-spacing: .14em; font-weight: 600; color: var(--muted); }
@@ -269,6 +271,8 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; accent-colo
   .brand-subtitle { display: none; }
   .brand-mark { flex-basis: 28px; width: 28px; height: 28px; }
   .header-caption { display: none; }
+  .current-user-prefix, .current-user-role { display: none; }
+  .header-side { gap: 6px; }
   .login-layout { padding: 22px 0 8px; }
   .login-card { padding: 22px 18px 18px; }
   .page-heading { align-items: flex-start; flex-direction: column; padding: 14px 0 10px; gap: 4px; }

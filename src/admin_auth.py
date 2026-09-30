@@ -1,7 +1,9 @@
 """Private, file-backed administrator authentication (unrelated to school login)."""
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 import base64
+import fcntl
 import hashlib
 import hmac
 import json
@@ -46,6 +48,22 @@ def _private_directory(directory, create=False):
             raise AuthConfigurationError()
     except OSError:
         raise AuthConfigurationError() from None
+
+
+@contextmanager
+def private_file_lock(path):
+    """Serialize private store writers, including CLI and separate web processes."""
+    path = Path(path)
+    _private_directory(path.parent, create=True)
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+            raise AuthConfigurationError()
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def _password_bytes(password):
@@ -414,7 +432,7 @@ class AuthManager:
     def add_user(self, user_id, password, role="member", created_at=""):
         if not valid_user_id(user_id):
             raise ValueError("用户名需为 2–24 位小写字母、数字或下划线，且以字母开头")
-        with self._lock:
+        with self._lock, private_file_lock(self.auth_file.with_suffix(".lock")):
             self._refresh_credentials()
             if user_id in self._users:
                 raise ValueError("该用户名已存在")
@@ -426,7 +444,7 @@ class AuthManager:
             self._refresh_credentials()
 
     def set_password(self, user_id, password, *, keep=None):
-        with self._lock:
+        with self._lock, private_file_lock(self.auth_file.with_suffix(".lock")):
             self._refresh_credentials()
             if user_id not in self._users:
                 raise ValueError("用户不存在")
@@ -442,7 +460,7 @@ class AuthManager:
                                                 self._fingerprint(self._users[user_id]))
 
     def remove_user(self, user_id):
-        with self._lock:
+        with self._lock, private_file_lock(self.auth_file.with_suffix(".lock")):
             self._refresh_credentials()
             if user_id not in self._users:
                 raise ValueError("用户不存在")
@@ -450,5 +468,30 @@ class AuthManager:
                 raise ValueError("不能移除管理员账户")
             users = dict(self._users)
             del users[user_id]
+            write_users_file(self.auth_file, users)
+            self._refresh_credentials()
+
+    def add_approved_member(self, user_id, record, provision):
+        """Install an already-hashed approved member, with a retry-safe profile first.
+
+        Only the owner approval route calls this. No role or hash is accepted from
+        an HTTP request. Existing unrelated accounts must never be overwritten.
+        """
+        if (not valid_user_id(user_id) or record.get("role") != "member"
+                or any(not isinstance(record.get(key), bytes) or len(record[key]) != 32
+                       for key in ("salt", "digest"))):
+            raise ValueError("审批账户记录无效")
+        with self._lock, private_file_lock(self.auth_file.with_suffix(".lock")):
+            self._refresh_credentials()
+            existing = self._users.get(user_id)
+            if existing is not None:
+                if existing != record:
+                    raise ValueError("用户名已被其他账户使用，不能覆盖，请联系申请人")
+                return  # Recovery after account commit but before the approval receipt.
+            if len(self._users) >= MAX_USERS:
+                raise ValueError("成员数量已达上限，请先整理成员")
+            provision()
+            users = dict(self._users)
+            users[user_id] = record
             write_users_file(self.auth_file, users)
             self._refresh_credentials()

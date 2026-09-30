@@ -14,7 +14,7 @@
 
 - **定时签到**：systemd 定时，默认 21:35 / 21:40 / 21:50（北京时间），可在页面修改；后续时点只在未成功时复核重试。
 - **网页管理**：学校 Token、签到坐标（手机定位 + 高德核对）、签到时间、离校/请假日期、通知渠道；只读预检、暂停、恢复。
-- **多用户**：管理员创建成员账户，每人独立档案、独立定时、独立记录。
+- **多用户与审批**：管理员直接添加成员，或开放自助注册并逐一审批；每人独立档案、定时和记录。
 - **Token 登录**：不保存学号密码；Token 过期时页面提示，重新粘贴链接即可。
 - **结果核验**：日期、身份、计划、时段、校区范围全部通过才提交一次；提交后复查学校记录；当天确认后不再运行。
 - **通知**：Bark、Server酱、企业微信群机器人、邮箱（QQ 邮箱、163、Gmail 等 SMTP）。
@@ -75,12 +75,14 @@ location /fzu/ {
 
 ## 使用流程
 
-1. 管理员在「成员管理」里填写用户名和初始密码，告知成员；成员登录后在「我的账户」修改密码。
+1. 管理员可手动添加成员，或在「成员管理 → 注册与审批」开放注册：成员自行申请，管理员通过后才能登录。
 2. 按页面「怎么获取 Token」的说明，在浏览器登录学校并粘贴地址栏链接。
 3. 填写签到坐标（可手机定位后打开高德核对）和真实地址，勾选本人确认；按需设置签到时间、请假日期和通知。
 4. 勾选「授权按计划执行自动签到」→「保存配置并暂停」→「只读预检」→「恢复定时」。
 
 之后每晚自动运行，结果显示在「今日签到情况」，第一晚建议再到学校 App 核对一次。
+
+公开注册默认关闭。开启后可复制注册链接；申请人设置自己的密码，在登录页「查询审核」查看结果。审批通过只创建独立的空白账户，不开启签到。管理员可随时关闭新注册，现有成员不受影响。详见 [注册与审批](docs/REGISTRATION.md)。
 
 ## 通知渠道
 
@@ -129,8 +131,17 @@ location /fzu/ {
 python3 -m venv venv && venv/bin/pip install -r requirements.lock
 venv/bin/python -m unittest discover -s tests -p 'test_*.py'   # 全部离线
 node --test tests/test_location.cjs                               # 坐标换算
-node --test tests/location_browser.cjs                            # 需要 playwright-core 与 Chromium
 ```
+
+浏览器离线测试需先安装 Playwright 与 Chromium：
+
+```bash
+npm install --no-save playwright-core
+npx playwright-core install chromium
+node --test tests/location_browser.cjs
+```
+
+使用已安装的 Chromium 时可通过 `FZU_CHROMIUM_EXECUTABLE` 指定路径。更新说明见 [CHANGELOG](docs/CHANGELOG.md)。
 
 `main.py` 签到流程 · `src/` 配置、学校接口、登录态、通知、后端 · `admin_server.py` 管理页服务 · `admin_static/` 前端 · `control_broker.py` root 控制代理 · `deploy/` 安装脚本与 systemd 单元 · `tests/` 离线测试
 

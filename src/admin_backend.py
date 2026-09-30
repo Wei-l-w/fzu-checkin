@@ -13,7 +13,7 @@ import threading
 
 import yaml
 
-from main import LABELS, control_lock, read_state, run_lock
+from main import CODE_LABELS, LABELS, control_lock, read_state, run_lock
 from src.checkin import SafeCheckinError, beijing_now
 from src.config import (CONFIG_PATH, ConfigError, _read_private, atomic_write_json,
                         load_config, state_dir, validation_errors)
@@ -252,7 +252,7 @@ class Backend:
     def _decorate(self, value):
         result = safe_result(value)
         if result is not None:
-            result["message"] = LABELS[result["status"]]
+            result["message"] = CODE_LABELS.get(result.get("code"), LABELS[result["status"]])
         return result
 
     def get_status(self):
@@ -269,6 +269,10 @@ class Backend:
             if clean and clean not in history:
                 history.append(clean)
         history.sort(key=lambda item: item.get("checked_at", ""), reverse=True)
+        # A legacy/failed CLI may have left an intermediate resume snapshot.
+        # The newer final control event takes precedence, also after a restart.
+        last_preflight = self._decorate(next((item for item in history
+                                              if item.get("mode") in {"preflight", "resume"}), None))
         changed_at = next((item.get("checked_at") for item in history if item.get("mode") == "config-save"), None)
         with self._mutex:
             job = copy.deepcopy(self._job)
@@ -309,7 +313,7 @@ class Backend:
                 saved = self._decorate(read_state(state_dir(cfg) / "last_preflight.json"))
                 if saved and saved.get("checked_at", "") >= started_at:
                     result = saved
-                    if action == "resume" and not outcome.get("ok") and result["status"] == "resumed":
+                    if action == "resume" and not outcome.get("ok") and result["status"] in {"resumed", "ready"}:
                         result = {"status": "failed", "mode": action, "code": "timer_not_enabled", "checked_at": beijing_now().isoformat()}
             record_event(cfg, result)
         except Exception:
@@ -369,3 +373,25 @@ class BackendRegistry:
         if directory.exists():
             stamp = beijing_now().strftime("%Y%m%dT%H%M%S")
             directory.rename(self.root / f".removed-{user_id}-{stamp}")
+
+    def create_registration_profile(self, user_id, request_id):
+        """Retry-safe, blank paused profile belonging to exactly one approval."""
+        if not valid_user_id(user_id) or not re.fullmatch(r"[a-f0-9]{32}", request_id):
+            raise BackendError("profile_invalid", "注册档案参数无效。")
+        directory = self.root / user_id
+        marker = {"request_id": request_id, "user_id": user_id}
+        with self._lock:
+            self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if directory.exists() or directory.is_symlink():
+                if directory.is_symlink() or read_state(directory / "registration-source.json") != marker:
+                    raise BackendError("profile_exists", "同名档案已存在，不能覆盖，请联系管理员。", 409)
+                if (directory / "config.yaml").is_file():
+                    return
+            else:
+                directory.mkdir(mode=0o700)
+                atomic_write_json(directory / "registration-source.json", marker)
+            (directory / "state").mkdir(mode=0o700, exist_ok=True)
+            (directory / "backups").mkdir(mode=0o700, exist_ok=True)
+            atomic_write_json(directory / "state" / "paused", {"paused_at": beijing_now().isoformat()})
+            # Last step: an incomplete provision has no usable config/account.
+            atomic_write_json(directory / "config.yaml", default_profile_config())

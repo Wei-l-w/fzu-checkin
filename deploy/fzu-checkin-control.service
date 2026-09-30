@@ -27,6 +27,9 @@ AmbientCapabilities=CAP_SETUID
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/run/fzu-checkin-control /var/lib/fzu-checkin
+# Only this root, allowlisted broker may create per-profile timer drop-ins.
+# The unprivileged web/school-client units keep /etc read-only.
+ReadWritePaths=/etc/systemd/system
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

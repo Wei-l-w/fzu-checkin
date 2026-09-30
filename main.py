@@ -25,11 +25,16 @@ EXIT = {"ready": 0, "already": 0, "no_task": 0, "confirmed": 0,
 LABELS = {"ready": "只读预检通过（未提交）", "already": "学校记录确认当天已签到",
           "no_task": "学校明确返回无需签到", "confirmed": "提交后学校记录复核确认签到成功",
           "paused": "自动提交已暂停", "skipped": "命中个人跳过日期",
-          "outside_window": "不在学校当日允许时段，未提交", "resumed": "已解除暂停（尚未提交）",
+          "outside_window": "不在学校当日允许时段，未提交", "resumed": "定时器已启用（本次未提交签到）",
           "config_error": "配置缺失或无效", "auth_error": "认证失败，需要检查登录或人工认证",
           "failed": "执行失败，请在手机学校 App 检查", "pending": "结果待确认，禁止重复提交",
           "busy": "已有实例运行，本次未执行", "notification_accepted": "部署测试通知获渠道受理，手机送达需本人确认",
           "notification_failed": "部署测试通知未获渠道确认"}
+CODE_LABELS = {
+    "timer_not_enabled": "学校预检已通过，但服务器定时器未能启用，当前不会自动签到；请联系管理员检查定时配置及权限",
+    "resume_preflight_passed": "学校预检已通过，正在启用定时器；尚不能视为恢复成功",
+    "resume_changed_before_activation": "恢复过程中出现了新的暂停或预检状态变化，未确认恢复定时",
+}
 
 
 def read_state(path):
@@ -148,6 +153,7 @@ def finish(cfg, mode, status, *, code=None, evidence=None, missing=None, window=
               "checked_at": beijing_now().isoformat(), "evidence": safe_evidence(evidence)}
     if code and re.fullmatch(r"[A-Za-z_0-9]{1,64}", str(code)):
         result["code"] = code.lower()
+        result["message"] = CODE_LABELS.get(result["code"], result["message"])
     if missing:
         result["missing"] = missing
     if window:
@@ -226,6 +232,30 @@ def inspect_status(cfg):
     return 0
 
 
+def finalize_resume(enabled):
+    """Internal CLI receipt, after systemd verification; never performs school I/O."""
+    cfg = None
+    try:
+        cfg = load_config()
+        directory = state_dir(cfg)
+        with control_lock(directory):
+            previous = read_state(directory / "last_preflight.json")
+            if enabled:
+                if (blocked_status(cfg) == "paused" or previous.get("mode") != "resume"
+                        or previous.get("status") != "ready"
+                        or previous.get("code") != "resume_preflight_passed"):
+                    return finish(cfg, "resume", "config_error", code="resume_changed_before_activation")
+                return finish(cfg, "resume", "resumed", code="timer_enabled",
+                              evidence=previous.get("evidence"), window=previous.get("window"))
+            if not (directory / "paused").exists():
+                atomic_write_json(directory / "paused", {"paused_at": beijing_now().isoformat()})
+            return finish(cfg, "resume", "failed", code="timer_not_enabled")
+    except Exception:
+        # The root caller must disable the timer if persisting the receipt fails.
+        print('{"status":"failed","code":"resume_receipt_failed"}', flush=True)
+        return EXIT["failed"]
+
+
 def execute(mode):
     cfg = None
     try:
@@ -272,7 +302,10 @@ def execute(mode):
                         if validation_errors(latest) or _fingerprint(latest) != _fingerprint(cfg):
                             return finish(cfg, mode, "config_error", code="config_changed_during_preflight")
                         (state_dir(cfg) / "paused").unlink(missing_ok=True)
-                    return finish(cfg, mode, "resumed", evidence=current.get("evidence"), window=current.get("window"))
+                    # This is only phase 1. The root CLI still has to install,
+                    # start and verify the timer before finalize_resume(True).
+                    return finish(cfg, mode, "ready", code="resume_preflight_passed",
+                                  evidence=current.get("evidence"), window=current.get("window"))
                 return finish(cfg, mode, status, evidence=current.get("evidence"), window=current.get("window"))
             if status != "ready":
                 return finish(cfg, mode, status, evidence=current.get("evidence"), window=current.get("window"))

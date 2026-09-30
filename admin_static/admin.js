@@ -102,6 +102,9 @@
   }
 
   let currentUser = null;
+  let registrationEnabled = null;
+  let registrationLoading = false;
+  let registrationChanging = false;
 
   function showLogin(message = '') {
     sessionGeneration += 1;
@@ -110,6 +113,12 @@
     $('current-user').replaceChildren();
     $('members-card').hidden = true;
     $('members-list').replaceChildren();
+    $('registration-list').replaceChildren();
+    $('registration-review').open = false;
+    $('registration-summary').textContent = '加载中…';
+    $('registration-form').reset();
+    $('registration-query-form').reset();
+    $('registration-query-result').hidden = true;
     $('password-form').reset();
     $('member-form').reset();
     invalidateLocationRequest(true);
@@ -134,6 +143,8 @@
     $('job-banner').hidden = true;
     $('feedback').hidden = !message;
     if (message) showFeedback(message, 'info');
+    showAuthView(window.location.hash === '#register' ? 'register' : 'login');
+    loadPublicRegistration();
   }
 
   function handleError(error) {
@@ -592,6 +603,14 @@
   }
 
   function resultLabel(result) {
+    if (result && result.code === 'timer_not_enabled') {
+      return { title: '定时器启用失败，未恢复', badge: '定时未启用', tone: 'danger',
+        detail: '学校预检已通过，但服务器定时器未能启用，当前不会自动签到。请联系管理员检查定时配置及权限，无需重填 Token。' };
+    }
+    if (result && result.code === 'resume_preflight_passed') {
+      return { title: '预检通过，待启用定时', badge: '仅预检通过', tone: 'info',
+        detail: '学校只读预检已通过；尚未确认定时器启用，请等待恢复操作的最终结果。' };
+    }
     return result && Object.hasOwn(labels, result.status) ? labels[result.status] : unknownLabel;
   }
 
@@ -758,6 +777,9 @@
     renderStatus(status);
     applyUser(session && session.user);
     $('login-form').reset();
+    $('registration-form').reset();
+    $('registration-query-form').reset();
+    $('registration-query-result').hidden = true;
     $('login-view').hidden = true;
     $('app-view').hidden = false;
     $('logout-button').hidden = false;
@@ -784,7 +806,10 @@
     }
     label.hidden = !id;
     $('members-card').hidden = role !== 'owner';
-    if (role === 'owner') loadMembers().catch(handleError);
+    if (role === 'owner') {
+      loadMembers().catch(handleError);
+      loadRegistrations().catch(handleError);
+    }
   }
 
   const notifyNames = { none: '未启用', bark: 'Bark', serverchan: 'Server酱', wecom: '企业微信', email: '邮箱' };
@@ -862,9 +887,176 @@
   }
 
   async function loadMembers() {
+    const generation = sessionGeneration;
     const result = await api('users');
-    renderMembers(result.users);
+    if (authenticated && generation === sessionGeneration && currentUser?.role === 'owner') renderMembers(result.users);
   }
+
+  const registrationStates = { pending: '待审批', approving: '批准处理中，可重试', approved: '已通过', rejected: '已拒绝' };
+
+  function showAuthView(view) {
+    const selected = ['login', 'register', 'query'].includes(view) ? view : 'login';
+    $('login-form').hidden = selected !== 'login';
+    $('registration-form').hidden = selected !== 'register';
+    $('registration-query-form').hidden = selected !== 'query';
+    $('registration-query-result').hidden = true;
+    $('login-title').textContent = { login: '登录签到管理', register: '申请加入签到管理', query: '查询注册审核' }[selected];
+    document.querySelectorAll('[data-auth-view]').forEach((button) => {
+      const current = button.dataset.authView === selected;
+      button.classList.toggle('is-current', current);
+      button.setAttribute('aria-pressed', String(current));
+    });
+    for (const id of ['admin-password', 'registration-password', 'registration-confirm', 'registration-query-password']) $(id).value = '';
+  }
+
+  async function loadPublicRegistration() {
+    const generation = sessionGeneration;
+    registrationEnabled = null;
+    $('registration-submit').disabled = true;
+    try {
+      const result = await api('registration');
+      if (authenticated || generation !== sessionGeneration) return;
+      registrationEnabled = result.enabled === true;
+      $('registration-submit').disabled = !registrationEnabled;
+      $('registration-public-state').textContent = registrationEnabled
+        ? '注册已开放，提交后等待管理员审批。' : '暂未开放新注册。已有申请可在“查询审核”查看结果。';
+    } catch (_) {
+      if (!authenticated && generation === sessionGeneration) $('registration-public-state').textContent = '无法读取注册状态，请刷新页面后重试。';
+    }
+  }
+
+  document.querySelectorAll('[data-auth-view]').forEach((button) => button.addEventListener('click', () => {
+    showAuthView(button.dataset.authView);
+    $('feedback').hidden = true;
+    if (button.dataset.authView === 'register') loadPublicRegistration();
+  }));
+
+  $('registration-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (registrationEnabled !== true) { showFeedback('当前未开放注册，请联系管理员。', 'error'); return; }
+    const username = $('registration-username').value.trim();
+    const password = $('registration-password').value;
+    if (password !== $('registration-confirm').value) { showFeedback('两次密码不一致。', 'error'); return; }
+    const generation = sessionGeneration;
+    $('registration-submit').disabled = true;
+    try {
+      const result = await api('registration/apply', { method: 'POST', body: { username, password, note: $('registration-note').value.trim() } });
+      if (authenticated || generation !== sessionGeneration) return;
+      $('registration-form').reset();
+      $('registration-query-username').value = username;
+      showAuthView('query');
+      showFeedback(safeText(result.message, '申请已提交，请等待管理员审批。'), 'success');
+    } catch (error) { if (!authenticated && generation === sessionGeneration) handleError(error); }
+    finally {
+      $('registration-password').value = '';
+      $('registration-confirm').value = '';
+      $('registration-submit').disabled = registrationEnabled !== true;
+    }
+  });
+
+  $('registration-query-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const generation = sessionGeneration;
+    const button = $('registration-query-submit');
+    button.disabled = true;
+    $('registration-query-result').hidden = true;
+    try {
+      const result = await api('registration/status', { method: 'POST', body: {
+        username: $('registration-query-username').value.trim(), password: $('registration-query-password').value } });
+      if (authenticated || generation !== sessionGeneration) return;
+      const box = $('registration-query-result');
+      const detail = { pending: '等待管理员审批，暂不能登录。', approving: '管理员已批准，正在完成开户，请稍后再查询。',
+        approved: '可以回到“登录”，使用注册时的用户名和密码。登录后还需自行配置、预检和恢复定时。',
+        rejected: '本次申请未通过。可联系管理员，或在注册开放时重新申请。' }[result.status] || '请联系管理员确认。';
+      box.textContent = `${registrationStates[result.status] || '状态待确认'}：${detail}${result.reason ? '\n审核说明：' + safeText(result.reason) : ''}`;
+      box.className = `notice notice-${result.status === 'approved' ? 'success' : result.status === 'rejected' ? 'warning' : 'info'}`;
+      box.hidden = false;
+    } catch (error) { if (!authenticated && generation === sessionGeneration) handleError(error); }
+    finally { $('registration-query-password').value = ''; button.disabled = false; }
+  });
+
+  function renderRegistrations(data) {
+    registrationEnabled = data.enabled === true;
+    const count = Number.isInteger(data.pending_count) ? data.pending_count : 0;
+    $('registration-summary').textContent = `${registrationEnabled ? '已开放' : '未开放'} · ${count} 待审`;
+    $('registration-state').textContent = registrationEnabled ? '公开注册已开放，所有申请仍需你审批。' : '公开注册已关闭，已有申请仍可审批和查询。';
+    $('registration-toggle').textContent = registrationEnabled ? '关闭注册' : '开放注册';
+    $('registration-toggle').disabled = registrationChanging;
+    const list = $('registration-list');
+    list.replaceChildren();
+    const rows = Array.isArray(data.requests) ? data.requests.slice(0, 256) : [];
+    if (!rows.length) {
+      const empty = document.createElement('li');
+      empty.className = 'registration-empty'; empty.textContent = '暂无注册申请'; list.append(empty);
+    }
+    for (const item of rows) {
+      const row = document.createElement('li'); row.className = 'registration-item';
+      const title = document.createElement('strong'); title.textContent = `${safeText(item.username)} · ${registrationStates[item.status] || '未知状态'}`;
+      const note = document.createElement('p'); note.textContent = safeText(item.note, '') || '未填写申请说明';
+      const meta = document.createElement('p'); meta.className = 'registration-meta';
+      meta.textContent = `申请：${formatDateTime(item.created_at)}${item.reviewed_at ? ' · 审核：' + formatDateTime(item.reviewed_at) : ''}`;
+      row.append(title, note, meta);
+      if (item.reason) { const reason = document.createElement('p'); reason.textContent = '审核说明：' + safeText(item.reason); row.append(reason); }
+      if (['pending', 'approving'].includes(item.status)) {
+        const tools = document.createElement('div'); tools.className = 'registration-tools';
+        const reason = document.createElement('input'); reason.type = 'text'; reason.maxLength = 200;
+        reason.placeholder = '拒绝原因（可选）'; reason.setAttribute('aria-label', `${safeText(item.username)} 的拒绝原因`);
+        const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'button button-small button-secondary';
+        approve.textContent = item.status === 'approving' ? '重试通过' : '通过';
+        const reject = document.createElement('button'); reject.type = 'button'; reject.className = 'button button-small button-quiet'; reject.textContent = '拒绝';
+        reject.disabled = item.status === 'approving';
+        for (const [button, decision] of [[approve, 'approve'], [reject, 'reject']]) button.addEventListener('click', async () => {
+          if (registrationChanging || !window.confirm(`${decision === 'approve' ? '通过' : '拒绝'} ${safeText(item.username)} 的注册申请？${decision === 'approve' ? '\n只创建空白成员账户，不启用签到。' : ''}`)) return;
+          const generation = sessionGeneration;
+          registrationChanging = true; approve.disabled = true; reject.disabled = true;
+          try {
+            const body = decision === 'approve' ? { confirmed: true } : { confirmed: true, reason: reason.value.trim() };
+            const result = await api(`registrations/${encodeURIComponent(item.id)}/${decision}`, { method: 'POST', body });
+            if (!authenticated || generation !== sessionGeneration || currentUser?.role !== 'owner') return;
+            renderRegistrations(result); await loadMembers();
+            showFeedback(decision === 'approve' ? '审批通过。成员可自行登录，自动签到仍暂停。' : '已拒绝申请，申请人可查询审核说明。', 'success');
+          } catch (error) { if (generation === sessionGeneration) handleError(error); }
+          finally { registrationChanging = false; if (generation === sessionGeneration) { $('registration-toggle').disabled = false; approve.disabled = false; reject.disabled = item.status === 'approving'; } }
+        });
+        tools.append(reason, approve, reject); row.append(tools);
+      }
+      list.append(row);
+    }
+  }
+
+  async function loadRegistrations() {
+    if (!authenticated || currentUser?.role !== 'owner' || registrationLoading || registrationChanging) return;
+    const generation = sessionGeneration;
+    registrationLoading = true;
+    try {
+      const result = await api('registrations');
+      if (authenticated && generation === sessionGeneration && currentUser?.role === 'owner') renderRegistrations(result);
+    } finally { registrationLoading = false; }
+  }
+  $('registration-refresh').addEventListener('click', () => loadRegistrations().catch(handleError));
+  $('registration-review').addEventListener('toggle', () => { if ($('registration-review').open) loadRegistrations().catch(handleError); });
+  $('registration-toggle').addEventListener('click', async () => {
+    if (registrationChanging || registrationEnabled === null) return;
+    const enabled = !registrationEnabled;
+    if (!window.confirm(enabled ? '开放注册申请？访客可以提交申请，但必须由管理员通过后才能使用。' : '关闭新注册？已有成员及待审批申请不受影响。')) return;
+    const generation = sessionGeneration;
+    registrationChanging = true; $('registration-toggle').disabled = true;
+    try {
+      const result = await api('registration/settings', { method: 'PUT', body: { enabled } });
+      if (generation !== sessionGeneration || !authenticated) return;
+      renderRegistrations(result);
+      showFeedback(enabled ? '注册申请已开放，可复制注册链接发给同学。' : '已关闭新注册，现有成员及待审批申请不受影响。', 'success');
+    } catch (error) { if (generation === sessionGeneration) handleError(error); }
+    finally { registrationChanging = false; if (generation === sessionGeneration) $('registration-toggle').disabled = false; }
+  });
+  $('registration-copy-link').addEventListener('click', async () => {
+    const link = new URL('./', document.baseURI); link.hash = 'register';
+    try { await navigator.clipboard.writeText(link.href); showFeedback('注册链接已复制；记得先开放注册。', 'success'); }
+    catch (_) { window.prompt('请复制注册链接；记得先开放注册：', link.href); }
+  });
+  window.setInterval(() => {
+    if (!document.hidden && !$('registration-review').open) loadRegistrations().catch(handleError);
+  }, 30000);
 
   $('copy-sso-link').addEventListener('click', async () => {
     const url = $('sso-link').href;

@@ -142,6 +142,26 @@ def apply_schedule(times, *, dropin: Path = TIMER_DROPIN, runner=subprocess.run)
     return True
 
 
+def activate_timer(profile: str, *, runner=subprocess.run) -> None:
+    """Called under the root schedule lock; success requires live systemd proof."""
+    if not profile_exists(profile):
+        raise ValueError("invalid_profile")
+    changed = apply_schedule(read_schedule_times(profile_config_path(profile)),
+                             dropin=timer_dropin(profile), runner=runner)
+    if not changed:
+        # A previous write may have succeeded but its daemon-reload failed.
+        runner([SYSTEMCTL, "daemon-reload"], check=True)
+    unit = timer_unit(profile)
+    runner([SYSTEMCTL, "enable", "--now", unit], check=True)
+    runner([SYSTEMCTL, "restart", unit], check=True)
+    result = runner([SYSTEMCTL, "show", unit, "--no-pager",
+                     "--property=ActiveState,UnitFileState"],
+                    check=True, capture_output=True)
+    properties = _properties(result.stdout)
+    if properties.get("ActiveState") != "active" or properties.get("UnitFileState") != "enabled":
+        raise RuntimeError("timer_not_enabled")
+
+
 @dataclass(frozen=True)
 class CommandResult:
     returncode: int

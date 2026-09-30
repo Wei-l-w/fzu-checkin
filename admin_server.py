@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 from src.admin_auth import (AuthConfigurationError, AuthManager, DEFAULT_AUTH_FILE,
                             DEFAULT_USERS_FILE, LoginLimited, valid_user_id, write_password_file)
+from src.registration import RegistrationError, RegistrationManager
 
 
 COOKIE_NAME = "__Secure-fzu_session"
@@ -129,6 +130,7 @@ class AdminHTTPServer(ThreadingHTTPServer):
         self.backend = backend
         self.auth = auth_manager if auth_manager is not None else AuthManager(
             os.environ.get("FZU_ADMIN_USERS_FILE") or os.environ.get("FZU_ADMIN_AUTH_FILE", DEFAULT_AUTH_FILE))
+        self.registrations = RegistrationManager(self.auth, self.backends)
         self.request_seconds = request_seconds
         self._connection_slots = threading.BoundedSemaphore(max_connections)
         super().__init__(server_address, AdminHandler)
@@ -343,6 +345,20 @@ class AdminHandler(BaseHTTPRequestHandler):
                              "user": {"id": session.user_id, "role": session.role}},
                        {"Set-Cookie": self._cookie(token)})
             return
+        if endpoint == "registration" and self.command == "GET":
+            self._json(200, self.server.registrations.public_settings())
+            return
+        if endpoint in {"registration/apply", "registration/status"} and self.command == "POST":
+            payload = self._read_json()
+            expected = {"username", "password", "note"} if endpoint.endswith("/apply") else {"username", "password"}
+            if set(payload) != expected or any(not isinstance(value, str) for value in payload.values()):
+                raise RequestError(400, "REGISTRATION_INVALID", "请填写页面支持的注册或查询字段")
+            if endpoint.endswith("/apply"):
+                result = self.server.registrations.apply(payload["username"], payload["password"], payload["note"])
+                self._json(202, result)
+            else:
+                self._json(200, self.server.registrations.applicant_status(payload["username"], payload["password"]))
+            return
         session = self._require_session()
 
         def backend():
@@ -352,7 +368,27 @@ class AdminHandler(BaseHTTPRequestHandler):
             if session.role != "owner":
                 raise RequestError(403, "OWNER_REQUIRED", "仅管理员可执行此操作")
 
-        if endpoint == "logout" and self.command == "POST":
+        if endpoint == "registrations" and self.command == "GET":
+            require_owner()
+            self._json(200, self.server.registrations.overview())
+        elif endpoint == "registration/settings" and self.command == "PUT":
+            require_owner()
+            payload = self._read_json()
+            if set(payload) != {"enabled"} or type(payload["enabled"]) is not bool:
+                raise RequestError(400, "REGISTRATION_SETTINGS_INVALID", "请明确选择开启或关闭注册")
+            self._json(200, self.server.registrations.set_enabled(payload["enabled"]))
+        elif endpoint.startswith("registrations/") and self.command == "POST":
+            require_owner()
+            parts = endpoint.split("/")
+            if len(parts) != 3 or not re.fullmatch(r"[a-f0-9]{32}", parts[1]) or parts[2] not in {"approve", "reject"}:
+                raise RequestError(404, "NOT_FOUND", "审批接口不存在")
+            payload = self._read_json()
+            expected = {"confirmed"} if parts[2] == "approve" else {"confirmed", "reason"}
+            if set(payload) != expected or payload.get("confirmed") is not True:
+                raise RequestError(400, "CONFIRM_REQUIRED", "请明确确认本次审批")
+            result = self.server.registrations.review(parts[1], parts[2], session.user_id, payload.get("reason", ""))
+            self._json(200, result)
+        elif endpoint == "logout" and self.command == "POST":
             payload = self._read_json()
             if payload:
                 raise RequestError(400, "PAYLOAD_UNEXPECTED", "此操作不需要参数")
@@ -445,6 +481,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             self._dispatch()
         except RequestError as error:
             self._error(error.status, error.code, error.message)
+        except RegistrationError as error:
+            headers = {"Retry-After": str(error.retry_after)} if error.retry_after else None
+            self._error(error.status, error.code, error.message, headers)
         except LoginLimited as error:
             self._error(429, "LOGIN_LIMITED", "登录尝试过于频繁，请稍后重试",
                         {"Retry-After": str(error.retry_after)})

@@ -293,8 +293,48 @@ class MainSafetyTests(unittest.TestCase):
     def test_resume_only_removes_existing_unchanged_pause_after_read_only_checks(self):
         main.atomic_write_json(self.directory / "paused", {"paused_at": "before"})
         code, result = self.invoke("resume")
-        self.assertEqual((code, result["status"]), (0, "resumed"))
+        self.assertEqual((code, result["status"], result["code"]), (0, "ready", "resume_preflight_passed"))
+        self.assertNotIn("已恢复", result["message"])
         self.assertFalse((self.directory / "paused").exists())
+        self.submit.assert_not_called()
+
+    def test_resume_receipt_only_records_success_after_timer_activation(self):
+        self.invoke("resume")
+        self.query.reset_mock()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main.finalize_resume(True), 0)
+        saved = self.read("last_preflight.json")
+        self.assertEqual((saved["status"], saved["code"]), ("resumed", "timer_enabled"))
+        self.assertEqual(saved["window"], self.current["window"])
+        self.query.assert_not_called()
+        self.submit.assert_not_called()
+
+    def test_failed_activation_repauses_and_replaces_intermediate_result(self):
+        self.invoke("resume")
+        self.query.reset_mock()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main.finalize_resume(False), main.EXIT["failed"])
+        saved = self.read("last_preflight.json")
+        self.assertEqual((saved["status"], saved["code"]), ("failed", "timer_not_enabled"))
+        self.assertNotIn("App", saved["message"])
+        self.assertTrue((self.directory / "paused").exists())
+        self.query.assert_not_called()
+        self.submit.assert_not_called()
+
+    def test_pause_during_activation_cannot_be_reported_as_resumed(self):
+        self.invoke("resume")
+        main.atomic_write_json(self.directory / "paused", {"paused_at": "new-user-pause"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main.finalize_resume(True), main.EXIT["config_error"])
+        self.assertEqual(self.read("paused")["paused_at"], "new-user-pause")
+        self.assertNotEqual(self.read("last_preflight.json")["status"], "resumed")
+        self.submit.assert_not_called()
+
+    def test_activation_receipt_requires_its_resume_preflight(self):
+        self.invoke("preflight")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main.finalize_resume(True), main.EXIT["config_error"])
+        self.assertNotEqual(self.read("last_preflight.json")["status"], "resumed")
         self.submit.assert_not_called()
 
     def test_resume_does_not_clear_pause_created_during_preflight(self):

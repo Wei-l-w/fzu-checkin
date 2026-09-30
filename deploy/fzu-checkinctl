@@ -43,8 +43,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, "/opt/fzu-checkin")
-from control_broker import (secure_runtime_directory, open_root_lock, read_schedule_times, apply_schedule,
-                            profile_exists, profile_config_path, timer_unit, service_unit, timer_dropin, PROFILES_ROOT)
+from control_broker import (secure_runtime_directory, open_root_lock, activate_timer,
+                            profile_exists, profile_config_path, timer_unit, service_unit, PROFILES_ROOT)
 
 command, profile = sys.argv[1], sys.argv[2]
 if not profile_exists(profile):
@@ -61,27 +61,35 @@ try:
         if os.path.lexists(PROFILES_ROOT / profile / "state" / "paused"):
             print("预检后出现新的暂停，未启用timer。", file=sys.stderr)
             raise SystemExit(1)
+        private_python = [
+            "/usr/sbin/runuser", "-u", "fzu-checkin", "--", "/usr/bin/env", "-i",
+            "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "TZ=Asia/Shanghai",
+            "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1",
+            "FZU_CHECKIN_CONFIG=" + str(profile_config_path(profile)),
+            "FZU_CHECKIN_STATE_DIR=" + str(PROFILES_ROOT / profile / "state"),
+            "/opt/fzu-checkin/venv/bin/python",
+        ]
+        def record_result(enabled):
+            # Fixed internal operation, not exposed as a browser/CLI action.
+            source = ("import sys; sys.path.insert(0, '/opt/fzu-checkin'); "
+                      "from main import finalize_resume; "
+                      "raise SystemExit(finalize_resume(" + ("True" if enabled else "False") + "))")
+            return subprocess.run(private_python + ["-c", source], check=False).returncode
         def fail_closed(message):
             print(message, file=sys.stderr)
-            subprocess.run([
-                "/usr/sbin/runuser", "-u", "fzu-checkin", "--", "/usr/bin/env", "-i",
-                "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "TZ=Asia/Shanghai",
-                "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1",
-                "FZU_CHECKIN_CONFIG=" + str(profile_config_path(profile)),
-                "FZU_CHECKIN_STATE_DIR=" + str(PROFILES_ROOT / profile / "state"),
-                "/opt/fzu-checkin/venv/bin/python", "/opt/fzu-checkin/main.py", "pause"
-            ], check=False)
-            raise SystemExit(1)
+            subprocess.run(private_python + ["/opt/fzu-checkin/main.py", "pause"], check=False)
+            subprocess.run(["/usr/bin/systemctl", "disable", "--now", timer_unit(profile)], check=False)
+            subprocess.run(["/usr/bin/systemctl", "stop", service_unit(profile)], check=False)
+            record_result(False)
+            raise SystemExit(26)
         try:
             # Times come only from this profile's private config, validated again here as root.
-            apply_schedule(read_schedule_times(profile_config_path(profile)), dropin=timer_dropin(profile))
+            activate_timer(profile)
+            if record_result(True):
+                raise RuntimeError("resume_not_finalized")
         except Exception:
-            fail_closed("签到时间配置无效或timer无法更新，已重新暂停。")
-        if subprocess.run(["/usr/bin/systemctl", "enable", "--now", timer_unit(profile)]).returncode:
-            fail_closed("启用timer失败，已重新暂停。")
-        if subprocess.run(["/usr/bin/systemctl", "restart", timer_unit(profile)]).returncode:
-            fail_closed("timer重载失败，已重新暂停。")
-        subprocess.run(["/usr/bin/systemctl", "list-timers", timer_unit(profile), "--no-pager"], check=True)
+            fail_closed("服务器定时器未能启用，已重新暂停，请联系管理员检查定时配置及权限。")
+        subprocess.run(["/usr/bin/systemctl", "list-timers", timer_unit(profile), "--no-pager"], check=False)
     else:
         raise SystemExit(2)
 finally:

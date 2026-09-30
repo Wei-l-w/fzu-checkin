@@ -162,6 +162,36 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(status["history"][0]["status"], "paused")
         self.assertTrue(status["paused"])
 
+    def test_final_resume_failure_supersedes_stale_success_after_restart(self):
+        stamp = "2026-09-30T12:14:34.565595+08:00"
+        atomic_write_json(self.base / "state" / "last_preflight.json",
+                          {"status": "resumed", "mode": "resume", "checked_at": stamp})
+        record_event(load_config(), {"status": "failed", "mode": "resume", "code": "timer_not_enabled",
+                                     "checked_at": "2026-09-30T12:14:34.896489+08:00"})
+        # A new backend has no in-memory job; durable final history is authoritative.
+        backend = Backend(controller=self.backend.controller)
+        result = backend.get_status()["last_preflight"]
+        self.assertEqual((result["status"], result["code"]), ("failed", "timer_not_enabled"))
+        self.assertIn("服务器定时器", result["message"])
+        self.assertNotIn("App", result["message"])
+
+    def test_resume_failure_after_successful_preflight_is_not_school_failure(self):
+        stamp = "2026-09-30T12:14:34.565595+08:00"
+        atomic_write_json(self.base / "state" / "last_preflight.json",
+                          {"status": "ready", "mode": "resume", "code": "resume_preflight_passed", "checked_at": stamp})
+        self.backend.controller = lambda action: {"ok": False, "returncode": 26}
+        self.backend._job = {"id": "test-job", "state": "running"}
+        self.backend._work("test-job", "resume", "2026-09-30T12:14:30+08:00")
+        result = self.backend._job["result"]
+        self.assertEqual((result["status"], result["code"]), ("failed", "timer_not_enabled"))
+        self.assertIn("管理员", result["message"])
+        self.assertNotIn("App", result["message"])
+
+    def test_preflight_phase_is_not_presented_as_timer_enabled(self):
+        result = self.backend._decorate({"status": "ready", "mode": "resume", "code": "resume_preflight_passed"})
+        self.assertIn("尚不能视为恢复成功", result["message"])
+        self.assertNotIn("定时器已启用", result["message"])
+
     def test_status_history_sanitizes_all_record_payloads(self):
         cfg = load_config()
         event = {"status": "pending", "mode": "run", "checked_at": "2026-09-18T21:35:00+08:00",

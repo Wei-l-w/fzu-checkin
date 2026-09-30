@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test: nodeTest, before, after } = require('node:test');
-const { chromium } = require('/home/ubuntu/offer-cdk-integration.cy1fjW/node_modules/playwright-core');
+const { chromium } = require('playwright-core');
 
 const STATIC = path.resolve(__dirname, '../admin_static');
 const START = { longitude: '119.205678', latitude: '26.064321', address: 'OFFLINE-ADDRESS-NOT-FOR-MAPS' };
@@ -17,13 +17,9 @@ let browser;
 
 before(async () => {
   browser = await chromium.launch({
-    executablePath: '/snap/chromium/current/usr/lib/chromium-browser/chrome',
+    ...(process.env.FZU_CHROMIUM_EXECUTABLE ? { executablePath: process.env.FZU_CHROMIUM_EXECUTABLE } : {}),
     headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-background-networking'],
-    env: {
-      ...process.env,
-      LD_LIBRARY_PATH: '/snap/chromium/current/usr/lib:/snap/chromium/current/usr/lib/aarch64-linux-gnu:/snap/gnome-46-2404/current/usr/lib:/snap/gnome-46-2404/current/usr/lib/aarch64-linux-gnu'
-    }
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-background-networking']
   });
 }, { timeout: 30000 });
 after(async () => { if (browser) await browser.close(); }, { timeout: 10000 });
@@ -34,7 +30,8 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function fixture(t, { width = 390, holdSave = false, protocol = 'https:', hostname = 'admin.example.invalid', statusOverride = null, sessionUser = null } = {}) {
+async function fixture(t, { width = 390, holdSave = false, protocol = 'https:', hostname = 'admin.example.invalid', statusOverride = null, sessionUser = null,
+  signedIn = true, registrationOpen = false, registrationRows = [], queryResult = { status: 'pending', reason: '' }, initialHash = '' } = {}) {
   const origin = `${protocol}//${hostname}`;
   const context = await browser.newContext({ viewport: { width, height: 844 }, serviceWorkers: 'block' });
   const requests = [];
@@ -42,6 +39,8 @@ async function fixture(t, { width = 390, holdSave = false, protocol = 'https:', 
   const errors = [];
   const saveStarted = deferred();
   const saveRelease = deferred();
+  let registrationData = { enabled: registrationOpen, pending_count: registrationRows.filter((item) => ['pending', 'approving'].includes(item.status)).length,
+    requests: registrationRows.map((item) => ({ ...item })) };
   let config = {
     enabled: false,
     user: { username: 'OFFLINE-ACCOUNT-ONLY' },
@@ -85,7 +84,28 @@ async function fixture(t, { width = 390, holdSave = false, protocol = 'https:', 
       body: request.postData() === null ? null : request.postDataJSON() };
     requests.push(entry);
     let result;
-    if (entry.method === 'GET' && endpoint === 'session') result = { authenticated: true, csrf: 'OFFLINE-CSRF', ...(sessionUser ? { user: sessionUser } : {}) };
+    if (entry.method === 'GET' && endpoint === 'session') {
+      if (!signedIn) {
+        await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ authenticated: false, csrf: null }) });
+        return;
+      }
+      result = { authenticated: true, csrf: 'OFFLINE-CSRF', ...(sessionUser ? { user: sessionUser } : {}) };
+    }
+    else if (entry.method === 'GET' && endpoint === 'registration') result = { enabled: registrationData.enabled };
+    else if (entry.method === 'GET' && endpoint === 'registrations') result = registrationData;
+    else if (entry.method === 'POST' && endpoint === 'registration/apply') result = { ok: true, status: 'pending', message: '申请已提交，等待管理员审批' };
+    else if (entry.method === 'POST' && endpoint === 'registration/status') result = queryResult;
+    else if (entry.method === 'PUT' && endpoint === 'registration/settings') {
+      registrationData.enabled = entry.body.enabled; result = registrationData;
+    }
+    else if (entry.method === 'POST' && /^registrations\/[a-f0-9]{32}\/(approve|reject)$/.test(endpoint)) {
+      const [, id, action] = endpoint.split('/');
+      const item = registrationData.requests.find((item) => item.id === id);
+      assert.ok(item);
+      item.status = action === 'approve' ? 'approved' : 'rejected'; item.reason = entry.body.reason || '';
+      registrationData.pending_count = registrationData.requests.filter((item) => item.status === 'pending').length;
+      result = registrationData;
+    }
     else if (entry.method === 'GET' && endpoint === 'users') result = { users: [{ id: 'admin', role: 'owner', created_at: '' }, { id: 'mate', role: 'member', created_at: '2026-09-29' }] };
     else if (entry.method === 'GET' && endpoint === 'config') result = configResponse();
     else if (entry.method === 'GET' && endpoint === 'status') result = status;
@@ -138,9 +158,14 @@ async function fixture(t, { width = 390, holdSave = false, protocol = 'https:', 
     assert.deepEqual(unexpected, [], 'all network requests must remain within the explicitly mocked routes');
     assert.deepEqual(errors, [], 'the location UI must not produce JavaScript errors');
   });
-  await page.goto(`${origin}/fzu/`);
-  await page.locator('#app-view:not([hidden])').waitFor();
-  await page.locator('#locate-button').waitFor();
+  await page.goto(`${origin}/fzu/${initialHash}`);
+  if (signedIn) {
+    await page.locator('#app-view:not([hidden])').waitFor();
+    await page.locator('#locate-button').waitFor();
+  } else {
+    await page.locator('#login-view:not([hidden])').waitFor();
+    await page.waitForFunction(() => !document.getElementById('registration-public-state').textContent.includes('正在读取'));
+  }
   return { page, requests, saveStarted: saveStarted.promise, releaseSave: saveRelease.resolve,
     writes: () => requests.filter((request) => request.method !== 'GET') };
 }
@@ -172,6 +197,88 @@ test('initial rendering never requests location, watches position, opens maps, o
     opens: window.__opens })), { calls: [], watches: 0, opens: [] });
   assert.deepEqual(await values(page), { ...START, confirmed: true });
   assert.deepEqual(writes(), []);
+});
+
+test('closed public signup cannot submit while application status remains available', async (t) => {
+  const { page, writes, requests } = await fixture(t, { signedIn: false, width: 320 });
+  await page.locator('[data-auth-view="register"]').click();
+  assert.equal(await page.locator('#registration-submit').isDisabled(), true);
+  assert.match(await page.locator('#registration-public-state').textContent(), /未开放/);
+  await page.locator('[data-auth-view="query"]').click();
+  await page.locator('#registration-query-username').fill('mate');
+  await page.locator('#registration-query-password').fill('OFFLINE-signup-password');
+  await page.locator('#registration-query-submit').click();
+  await page.locator('#registration-query-result:not([hidden])').waitFor();
+  assert.match(await page.locator('#registration-query-result').textContent(), /待审批/);
+  assert.equal(await page.locator('#registration-query-password').inputValue(), '');
+  assert.equal(writes().length, 1);
+  assert.equal(writes()[0].endpoint, 'registration/status');
+  assert.equal(requests.some((item) => ['config', 'status', 'users', 'registrations'].includes(item.endpoint)), false);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+});
+
+test('signup uses the applicant password only for submission and leaves the user signed out', async (t) => {
+  const { page, writes, requests } = await fixture(t, { signedIn: false, registrationOpen: true, initialHash: '#register' });
+  await page.locator('#registration-username').fill('mate');
+  await page.locator('#registration-password').fill('OFFLINE-signup-password');
+  await page.locator('#registration-confirm').fill('OFFLINE-mismatch-password');
+  await page.locator('#registration-submit').click();
+  assert.deepEqual(writes(), []);
+  await page.locator('#registration-confirm').fill('OFFLINE-signup-password');
+  await page.locator('#registration-note').fill('同学申请，OFFLINE 演示');
+  if (process.env.FZU_UI_SHOTS) await page.locator('#login-view').screenshot({ path: path.join(process.env.FZU_UI_SHOTS, 'registration-mobile.png') });
+  await page.locator('#registration-submit').click();
+  await page.locator('#registration-query-form:not([hidden])').waitFor();
+  assert.equal(await page.locator('#registration-query-username').inputValue(), 'mate');
+  assert.equal(await page.locator('#registration-password').inputValue(), '');
+  assert.equal(await page.locator('#registration-confirm').inputValue(), '');
+  assert.equal(await page.locator('#app-view').isHidden(), true);
+  assert.deepEqual(writes().map((item) => item.endpoint), ['registration/apply']);
+  assert.deepEqual(writes()[0].body, { username: 'mate', password: 'OFFLINE-signup-password', note: '同学申请，OFFLINE 演示' });
+  assert.equal(requests.some((item) => item.endpoint.startsWith('actions/')), false);
+  assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
+});
+
+test('applicant rejection reasons are text, not HTML, and cannot expose a management session', async (t) => {
+  const { page } = await fixture(t, { signedIn: false, queryResult: { status: 'rejected', reason: '<img src=x onerror=alert(1)>请补充说明' } });
+  await page.locator('[data-auth-view="query"]').click();
+  await page.locator('#registration-query-username').fill('mate');
+  await page.locator('#registration-query-password').fill('OFFLINE-signup-password');
+  await page.locator('#registration-query-submit').click();
+  await page.locator('#registration-query-result:not([hidden])').waitFor();
+  assert.match(await page.locator('#registration-query-result').textContent(), /已拒绝/);
+  assert.match(await page.locator('#registration-query-result').textContent(), /<img/);
+  assert.equal(await page.locator('#registration-query-result img').count(), 0);
+  assert.equal(await page.locator('#members-card').isHidden(), true);
+});
+
+test('owner approval panel is collapsed, bounded, owner-only and does not activate timers', async (t) => {
+  const rows = Array.from({ length: 20 }, (_, index) => ({ id: index.toString(16).padStart(32, '0'), username: `mate${index}`, status: 'pending',
+    note: index === 0 ? '<img src=x onerror=alert(1)>OFFLINE 申请' : 'OFFLINE 申请', created_at: '2026-09-30T04:30:00.000000+00:00', reviewed_at: '', reason: '' }));
+  const { page, writes } = await fixture(t, { width: 390, sessionUser: { id: 'admin', role: 'owner' }, registrationRows: rows });
+  await page.waitForFunction(() => document.getElementById('registration-summary').textContent.includes('20 待审'));
+  assert.equal(await page.evaluate(() => document.getElementById('registration-review').open), false);
+  await page.locator('#registration-review > summary').click();
+  assert.equal(await page.locator('#registration-list img').count(), 0);
+  const dimensions = await page.locator('#registration-list').evaluate((element) => ({ height: element.clientHeight, scroll: element.scrollHeight }));
+  assert.ok(dimensions.height <= 340 && dimensions.scroll > dimensions.height);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await page.locator('#registration-toggle').click();
+  await page.waitForFunction(() => document.getElementById('registration-toggle').textContent === '关闭注册');
+  if (process.env.FZU_UI_SHOTS) await page.locator('#members-card').screenshot({ path: path.join(process.env.FZU_UI_SHOTS, 'approval-mobile.png') });
+  await page.locator('.registration-item').first().getByRole('button', { name: '通过', exact: true }).click();
+  await page.waitForFunction(() => document.getElementById('registration-summary').textContent.includes('19 待审'));
+  const second = page.locator('.registration-item').nth(1);
+  await second.locator('input').fill('请补充申请说明');
+  await second.getByRole('button', { name: '拒绝', exact: true }).click();
+  await page.waitForFunction(() => document.getElementById('registration-summary').textContent.includes('18 待审'));
+  assert.deepEqual(writes().map((item) => item.endpoint), ['registration/settings', `registrations/${rows[0].id}/approve`, `registrations/${rows[1].id}/reject`]);
+  assert.deepEqual(writes()[1].body, { confirmed: true });
+  assert.equal(writes()[2].body.reason, '请补充申请说明');
+  assert.equal(writes().some((item) => item.endpoint.startsWith('actions/')), false);
+  const member = await fixture(t, { sessionUser: { id: 'mate', role: 'member' } });
+  assert.equal(await member.page.locator('#registration-review').isVisible(), false);
+  assert.equal(member.requests.some((item) => item.endpoint === 'registrations'), false);
 });
 
 test('one explicit location click converts WGS84 to a GCJ-02 draft only, retaining address and requiring new confirmation', async (t) => {
@@ -309,6 +416,40 @@ test('the control card states whether the timer is running and makes resume redu
   assert.equal(await running.page.locator('[data-action="pause"]').isEnabled(), true);
   assert.equal(await running.page.locator('[data-action="preflight"]').isEnabled(), true);
   assert.deepEqual(running.writes(), []);
+});
+
+test('timer activation failures clearly identify the server rather than school login', async (t) => {
+  const result = { status: 'failed', mode: 'resume', code: 'timer_not_enabled', checked_at: '2026-09-19T12:14:34+08:00' };
+  const { page, writes } = await fixture(t, { statusOverride: { enabled: true, paused: true,
+    last_preflight: result, history: [result], job: { id: 'offline-failure', action: 'resume', state: 'done', result } } });
+  await page.waitForFunction(() => document.getElementById('preflight-summary').textContent.includes('定时器启用失败'));
+  assert.match(await page.locator('#result-description').textContent(), /服务器定时器/);
+  assert.match(await page.locator('#result-description').textContent(), /无需重填 Token/);
+  assert.doesNotMatch(await page.locator('#preflight-summary').textContent(), /定时已恢复/);
+  assert.doesNotMatch(await page.locator('#job-banner').textContent(), /App/);
+  assert.deepEqual(writes(), []);
+});
+
+test('resume preflight alone is never displayed as an enabled timer', async (t) => {
+  const result = { status: 'ready', mode: 'resume', code: 'resume_preflight_passed', checked_at: '2026-09-19T12:14:34+08:00' };
+  const { page } = await fixture(t, { statusOverride: { enabled: true, paused: false,
+    last_preflight: result, history: [result], busy: true,
+    job: { id: 'offline-resume', action: 'resume', state: 'running', result: null } } });
+  await page.waitForFunction(() => document.getElementById('preflight-summary').textContent.includes('待启用定时'));
+  assert.doesNotMatch(await page.locator('#preflight-summary').textContent(), /定时已恢复/);
+  assert.equal(await page.locator('[data-action="resume"]').textContent(), '恢复定时');
+});
+
+test('a completed verified resume agrees with the live timer and disables redundant resume', async (t) => {
+  const result = { status: 'resumed', mode: 'resume', code: 'timer_enabled', checked_at: '2026-09-19T12:14:34+08:00' };
+  const { page, writes } = await fixture(t, { statusOverride: { enabled: true, paused: false,
+    timer: { active: 'active', enabled: 'enabled', next_run: '2026-09-19T21:10:00+08:00' },
+    last_preflight: result, history: [result], job: { id: 'offline-success', action: 'resume', state: 'done', result } } });
+  await page.waitForFunction(() => document.getElementById('control-state').textContent.includes('定时已启用'));
+  assert.match(await page.locator('#preflight-summary').textContent(), /定时已恢复/);
+  assert.match(await page.locator('#job-banner').textContent(), /本次没有即时签到/);
+  assert.equal(await page.locator('[data-action="resume"]').isDisabled(), true);
+  assert.deepEqual(writes(), []);
 });
 
 test('skip-date and notification sections are collapsed with live state summaries', async (t) => {

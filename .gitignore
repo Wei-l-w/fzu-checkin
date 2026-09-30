@@ -1,6 +1,12 @@
 # ---- 敏感信息，勿提交 ----
 config.yaml
 config.yml
+users.json
+registrations.json
+auth.json
+session.json
+initial-password.txt
+profiles/
 
 # ---- Python ----
 __pycache__/
@@ -18,3 +24,4 @@ rollback/
 *.tmp
 node_modules/
 .pytest_cache/
+ui-validation/

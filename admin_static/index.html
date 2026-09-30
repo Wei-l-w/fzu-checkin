@@ -34,9 +34,14 @@
 
       <section id="login-view" class="login-layout" aria-labelledby="login-title">
         <div class="card login-card">
-          <span class="section-kicker">管理员入口</span>
+          <span class="section-kicker">成员入口</span>
           <h2 id="login-title">登录签到管理</h2>
           <p class="muted">这里填写签到管理页的用户名和密码，<strong>不是学校账号</strong>。</p>
+          <div class="auth-tabs" aria-label="账户入口">
+            <button class="button button-small is-current" type="button" data-auth-view="login" aria-pressed="true">登录</button>
+            <button class="button button-small" type="button" data-auth-view="register" aria-pressed="false">申请注册</button>
+            <button class="button button-small" type="button" data-auth-view="query" aria-pressed="false">查询审核</button>
+          </div>
           <form id="login-form" autocomplete="off">
             <div class="field">
               <label for="admin-username">用户名</label>
@@ -48,6 +53,22 @@
             </div>
             <button id="login-button" class="button button-primary button-full" type="submit">登录管理页面</button>
             <p id="login-help" class="field-hint">每位成员使用自己的用户名和密码，登录后只能看到和管理自己的签到配置。请只在本人信任的设备上操作。</p>
+          </form>
+          <form id="registration-form" autocomplete="off" hidden>
+            <p id="registration-public-state" class="field-hint">正在读取注册状态…</p>
+            <div class="field"><label for="registration-username">用户名</label><input id="registration-username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="24" pattern="[a-z][a-z0-9_]{1,23}" placeholder="小写字母开头，如 zhangsan"></div>
+            <div class="field"><label for="registration-password">设置密码</label><input id="registration-password" type="password" autocomplete="new-password" required minlength="10" maxlength="1024" placeholder="至少 10 个字符，不要使用学校密码"></div>
+            <div class="field"><label for="registration-confirm">再次输入密码</label><input id="registration-confirm" type="password" autocomplete="new-password" required minlength="10" maxlength="1024"></div>
+            <div class="field"><label for="registration-note">申请说明（可选）</label><textarea id="registration-note" rows="2" maxlength="200" placeholder="便于管理员确认身份的说明；不要填写学校密码、Token 等凭据"></textarea></div>
+            <button id="registration-submit" class="button button-primary button-full" type="submit" disabled>提交申请</button>
+            <p class="field-hint">需管理员通过后才能登录。注册不会开通自动签到，也不会收集学校凭据。</p>
+          </form>
+          <form id="registration-query-form" autocomplete="off" hidden>
+            <div class="field"><label for="registration-query-username">申请时的用户名</label><input id="registration-query-username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="24"></div>
+            <div class="field"><label for="registration-query-password">申请时设置的密码</label><input id="registration-query-password" type="password" autocomplete="current-password" required maxlength="1024"></div>
+            <button id="registration-query-submit" class="button button-secondary button-full" type="submit">查询审核结果</button>
+            <p class="field-hint">仅凭用户名不能查询。关闭新注册后，已有申请仍可查询；获批后请回到“登录”。</p>
+            <div id="registration-query-result" class="notice notice-info" role="status" hidden></div>
           </form>
           <ul class="login-notes">
             <li>预检与真实签到明确区分</li>
@@ -219,6 +240,17 @@
             </div>
             <div id="members-card" class="card form-card" hidden>
               <div class="numbered-heading"><span class="section-number">众</span><div><h3>成员管理</h3><p class="muted">仅管理员可见。每位成员用自己的用户名和密码登录，各自管理 Token、位置、时间和通知。</p></div></div>
+              <details id="registration-review" class="sub-details registration-review">
+                <summary><span>注册与审批</span><span id="registration-summary" class="secret-status">加载中…</span></summary>
+                <div class="registration-toolbar">
+                  <span id="registration-state" class="field-hint">公开注册默认关闭</span>
+                  <button id="registration-toggle" class="button button-small button-secondary" type="button" disabled>开放注册</button>
+                  <button id="registration-refresh" class="button button-small button-quiet" type="button">刷新申请</button>
+                  <button id="registration-copy-link" class="button button-small button-quiet" type="button">复制注册链接</button>
+                </div>
+                <p class="field-hint">通过后仅创建独立空白账户，自动签到保持暂停；密码只保存散列，管理员不可查看。</p>
+                <ul id="registration-list" class="registration-list" aria-label="注册申请列表"></ul>
+              </details>
               <ul id="members-list" class="members-list"></ul>
               <form id="member-form" autocomplete="off" class="member-form">
                 <div class="two-fields">
